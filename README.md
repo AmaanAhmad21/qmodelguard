@@ -5,7 +5,7 @@ Quantum-Safe ML Model Protection — Encrypt and sign machine learning models us
 ## Tech Stack
 
 - **Backend:** FastAPI (Python), SQLite, local filesystem storage
-- **Frontend:** React + Tailwind CSS
+- **Frontend:** React + Tailwind CSS + React Router
 - **Crypto:** qcrypto (stubbed; to be implemented)
 
 ## Quick Start (Clone and Run)
@@ -51,6 +51,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+After a fresh clone or after merging branches, always run `npm install` in the frontend folder so all dependencies (React, react-router-dom, Tailwind, Vite, etc.) are installed.
 
 Frontend runs at **http://localhost:3000**. Tailwind CSS v3 is pinned; do not upgrade to v4 (it requires a different PostCSS setup).
 
