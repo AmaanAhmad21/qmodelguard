@@ -1,6 +1,6 @@
 """SQLite models for QModelGuard."""
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
 Base = declarative_base()
@@ -16,12 +16,13 @@ class User(Base):
 
 
 class KeyPair(Base):
-    """Stored Kyber/Dilithium keypair for a user."""
+    """Stored Kyber or Dilithium keypair for a user."""
     __tablename__ = "keypairs"
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    public_key = Column(Text, nullable=False)  # Base64 or PEM
-    private_key = Column(Text, nullable=False)  # Encrypted at rest (TODO)
+    key_type = Column(String(8), nullable=False)  # "kem" or "sig"
+    public_key = Column(Text, nullable=False)  # Base64
+    private_key = Column(Text, nullable=False)  # Base64 (TODO: encrypt at rest)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

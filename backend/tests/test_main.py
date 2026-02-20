@@ -1,9 +1,16 @@
-"""Basic API tests. No qcrypto required (stubs used)."""
+"""API tests. Requires qcrypto for Phase B+."""
+import uuid
+
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 client = TestClient(app)
+
+
+def _unique_username() -> str:
+    """Unique username for test isolation."""
+    return f"test_{uuid.uuid4().hex[:12]}"
 
 
 def test_health():
@@ -14,8 +21,14 @@ def test_health():
 
 
 def test_keys_generate():
-    """Smoke: POST /api/keys/generate returns 200 and expected key fields."""
+    """POST /api/keys/generate requires auth, returns key ids."""
     r = client.post("/api/keys/generate")
+    assert r.status_code == 401
+    username = _unique_username()
+    client.post("/api/users/register", json={"username": username, "password": "secret123"})
+    login_r = client.post("/api/users/login", json={"username": username, "password": "secret123"})
+    token = login_r.json()["token"]
+    r = client.post("/api/keys/generate", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     data = r.json()
     assert "kem_key_id" in data
@@ -30,32 +43,89 @@ def test_root():
 
 
 def test_keys_public():
-    """Stub get public keys."""
+    """GET /api/keys/public returns keys for authenticated user (keys from register)."""
     r = client.get("/api/keys/public")
+    assert r.status_code == 401
+    username = _unique_username()
+    client.post("/api/users/register", json={"username": username, "password": "secret123"})
+    login_r = client.post("/api/users/login", json={"username": username, "password": "secret123"})
+    token = login_r.json()["token"]
+    r = client.get("/api/keys/public", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
+    data = r.json()
+    assert "kem_public_key" in data
+    assert "sig_public_key" in data
 
 
 def test_keys_public_by_id():
-    """Stub get public key by id."""
-    r = client.get("/api/keys/public/1")
+    """GET /api/keys/public/{id} returns another user's keys by id or username."""
+    username = _unique_username()
+    reg = client.post("/api/users/register", json={"username": username, "password": "secret123"})
+    user_id = reg.json()["user_id"]
+    r = client.get(f"/api/keys/public/{user_id}")
     assert r.status_code == 200
-    r2 = client.get("/api/keys/public/unknown")
+    assert r.json()["username"] == username
+    assert "kem_public_key" in r.json()
+    r2 = client.get("/api/keys/public/unknown_nonexistent_user")
     assert r2.status_code == 404
 
 
 def test_users_register():
-    """Stub register."""
-    r = client.post("/api/users/register", json={"username": "alice", "password": "secret"})
+    """Register creates user and returns JWT."""
+    username = _unique_username()
+    r = client.post(
+        "/api/users/register",
+        json={"username": username, "password": "secret123"},
+    )
     assert r.status_code == 200
-    assert "token" in r.json()
+    data = r.json()
+    assert "token" in data
+    assert "user_id" in data
+    assert data["user_id"]  # non-empty
+    # Duplicate username returns 400
+    r2 = client.post(
+        "/api/users/register",
+        json={"username": username, "password": "other"},
+    )
+    assert r2.status_code == 400
 
 
 def test_users_login():
-    """Stub login."""
-    r = client.post("/api/users/login", json={"username": "alice", "password": "secret"})
+    """Login returns JWT for valid creds, 401 for invalid."""
+    username = _unique_username()
+    client.post("/api/users/register", json={"username": username, "password": "secret123"})
+    r = client.post(
+        "/api/users/login",
+        json={"username": username, "password": "secret123"},
+    )
     assert r.status_code == 200
-    r2 = client.post("/api/users/login", json={"username": "bad", "password": "x"})
+    data = r.json()
+    assert "token" in data
+    assert "user_id" in data
+    r2 = client.post(
+        "/api/users/login",
+        json={"username": "nonexistent", "password": "x"},
+    )
     assert r2.status_code == 401
+
+
+def test_users_me():
+    """GET /api/users/me returns current user when authenticated."""
+    username = _unique_username()
+    client.post("/api/users/register", json={"username": username, "password": "secret123"})
+    login_r = client.post(
+        "/api/users/login",
+        json={"username": username, "password": "secret123"},
+    )
+    token = login_r.json()["token"]
+    r = client.get(
+        "/api/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["username"] == username
+    r2 = client.get("/api/users/me")
+    assert r2.status_code == 401  # no auth
 
 
 def test_models_upload():
