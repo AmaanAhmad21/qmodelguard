@@ -14,7 +14,7 @@ Quantum-Safe ML Model Protection — Encrypt and sign machine learning models us
 
 ```bash
 git clone <repo-url>
-cd QModelGuard
+cd qmodelguard
 ```
 
 ### 2. Backend Setup
@@ -26,6 +26,7 @@ python -m venv venv
 
 Activate the virtual environment:
 
+- **Windows (Git Bash):** `source venv/Scripts/activate`
 - **Windows (cmd):** `venv\Scripts\activate`
 - **Windows (PowerShell):** `venv\Scripts\Activate.ps1`
 - **macOS / Linux:** `source venv/bin/activate`
@@ -34,8 +35,10 @@ Then:
 
 ```bash
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
+
+> Use `python -m uvicorn` (not `uvicorn` directly) so it works even if the venv activate script has path issues.
 
 Backend runs at **http://localhost:8000**
 
@@ -49,7 +52,7 @@ npm install
 npm run dev
 ```
 
-Frontend runs at **http://localhost:3000**
+Frontend runs at **http://localhost:3000**. Tailwind CSS v3 is pinned; do not upgrade to v4 (it requires a different PostCSS setup).
 
 ### 4. URLs to Open
 
@@ -63,16 +66,18 @@ The frontend proxies `/api` to the backend, so API calls work from the React app
 
 ## Convenience Scripts (Root)
 
-From the project root, after `npm install` (installs `concurrently`):
+From the project root (`qmodelguard/`), after `npm install` (installs `concurrently`):
 
 ```bash
-# Run backend only
-npm run dev:backend
-
 # Run frontend only
 npm run dev:frontend
 
-# Run both (requires npm install at root first)
+# Run backend (requires venv activated in this terminal first)
+cd backend && source venv/Scripts/activate   # Git Bash
+# or: cd backend && venv\Scripts\activate    # Windows cmd
+npm run dev:backend
+
+# Run both backend + frontend (activate backend venv first)
 npm run dev
 ```
 
@@ -94,7 +99,7 @@ Optional env overrides (defaults work for local dev):
 
 - **Backend (8000):** Another process is using port 8000. Stop it or use a different port:
   ```bash
-  uvicorn app.main:app --reload --port 8001
+  python -m uvicorn app.main:app --reload --port 8001
   ```
   If you change the port, set `VITE_API_PROXY_TARGET=http://localhost:8001` in `frontend/.env` (or create it from `.env.example`).
 
@@ -110,15 +115,42 @@ You are not in the `backend` folder, or the venv is not activated. Run:
 
 ```bash
 cd backend
-# Activate venv (see step 2 above)
+# Activate venv first (see step 2 above)
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 ### venv not found / "python" not recognized
 
 - Create a venv: `python -m venv venv`
 - If `python` fails, try `python3` or install Python from [python.org](https://python.org) (3.10+).
+
+### Fatal error in launcher / pip or uvicorn not found after clone
+
+The venv stores absolute paths. If you cloned or moved the repo, the venv may be broken. Delete and recreate it:
+
+```bash
+cd backend
+rm -rf venv          # or: rmdir /s venv  (Windows cmd)
+python -m venv venv
+source venv/Scripts/activate   # Git Bash (Windows)
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+### Frontend: ECONNREFUSED / proxy error for /health
+
+The frontend proxies `/api` and `/health` to the backend. Start the backend first (step 2), then the frontend. If the backend is not running on port 8000, you'll see connection refused.
+
+### Tailwind PostCSS / "Cannot find module 'tailwindcss'" or v4 plugin error
+
+Ensure `tailwindcss`, `postcss`, and `autoprefixer` are in `frontend/package.json` devDependencies. Tailwind must be v3 (not v4). If you see v4 errors:
+
+```bash
+cd frontend
+npm install -D tailwindcss@3 postcss autoprefixer
+npm run dev
+```
 
 ### Node / npm version issues
 
