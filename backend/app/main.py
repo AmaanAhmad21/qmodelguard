@@ -66,5 +66,21 @@ def root():
 
 @app.get("/health")
 def health():
-    """Health check for quick testing."""
-    return {"status": "ok"}
+    """Health check: status, DB connectivity, storage dir writable."""
+    from sqlalchemy import text
+    out = {"status": "ok"}
+    try:
+        from app.db.database import engine
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        out["database"] = "ok"
+    except Exception as e:
+        out["database"] = str(e)
+    try:
+        from app.services.storage import ensure_storage_dir, get_storage_path
+        ensure_storage_dir()
+        p = get_storage_path()
+        out["storage"] = "ok" if p.exists() else "missing"
+    except Exception as e:
+        out["storage"] = str(e)
+    return out

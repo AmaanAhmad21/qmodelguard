@@ -75,3 +75,15 @@ def me(
 ):
     """Get current user (requires auth)."""
     return {"user_id": str(user.id), "username": user.username}
+
+
+@router.get("/list")
+def list_users(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List users for e.g. 'Encrypt for' dropdown. Returns id and username only. Auth required."""
+    users_list = db.query(User).order_by(User.username).all()
+    return {
+        "items": [{"id": str(u.id), "username": u.username} for u in users_list],
+    }
