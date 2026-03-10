@@ -16,6 +16,7 @@ export default function Login({ onSuccess }) {
     try {
       const data = await login(username, password); // { token, user_id }
       localStorage.setItem("token", data.token);
+      localStorage.setItem("user_id", data.user_id);
       onSuccess?.();
     } catch (e) {
       setErr(e.message || "Login failed");
@@ -25,8 +26,8 @@ export default function Login({ onSuccess }) {
   }
 
   return (
-    <div className="w-full max-w-md">
-      <div className="rounded-2xl border bg-white p-6 shadow-sm">
+    <div className="min-h-[calc(100vh-64px)] w-full flex items-center justify-center px-6">
+      <div className="w-full max-w-3xl rounded-2xl border bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold">Login</h1>
         <p className="text-sm opacity-70 mt-1">Sign in to your account.</p>
 
