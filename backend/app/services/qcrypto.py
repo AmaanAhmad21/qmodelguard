@@ -1,19 +1,22 @@
 """Quantum-safe crypto via qcrypto (Kyber + Dilithium).
 
 Falls back to stubs if liboqs is unavailable (e.g. Windows without prebuilt binaries).
+On Windows we skip importing qcrypto/oqs so liboqs is never auto-installed (branch 0.14.1 is gone).
 """
 import base64
 import secrets
+import sys
 from typing import NamedTuple
 
 QCRYPTO_AVAILABLE = False
 _DilithiumSig = _KyberKEM = _decrypt = _encrypt = None
 
-try:
-    from qcrypto import DilithiumSig as _DilithiumSig, KyberKEM as _KyberKEM, decrypt as _decrypt, encrypt as _encrypt
-    QCRYPTO_AVAILABLE = True
-except (ImportError, OSError, RuntimeError, SystemExit):
-    pass
+if sys.platform != "win32":
+    try:
+        from qcrypto import DilithiumSig as _DilithiumSig, KyberKEM as _KyberKEM, decrypt as _decrypt, encrypt as _encrypt
+        QCRYPTO_AVAILABLE = True
+    except (ImportError, OSError, RuntimeError, SystemExit):
+        pass
 
 KEM_ALG = "Kyber768"
 SIG_ALG = "Dilithium3"

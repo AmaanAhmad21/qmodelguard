@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, Link, useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import { ApiError } from "./api";
 import {
   getMe,
+  listModels,
   uploadModel,
   generateKeys,
   getPublicKeys,
@@ -34,17 +36,36 @@ function Dashboard({ me, token }) {
   const [userKeyError, setUserKeyError] = useState("");
   const [userKeyResult, setUserKeyResult] = useState(null);
 
-  // Mocked list; backend can replace later. type: plain | encrypted | signed
-  const [models, setModels] = useState([
-    { id: "1", name: "sentiment_model.pt", size: "48 MB", type: "plain" },
-    { id: "2", name: "fraud_detector.pt.enc", size: "52 MB", type: "encrypted" },
-    { id: "3", name: "classifier.pt", size: "120 MB", type: "signed", label: "(signed)" },
-  ]);
-  const [recentActivity, setRecentActivity] = useState([
-    { text: "Encrypted model for @bob", time: "2 hours ago" },
-    { text: "Verified signature from @charlie", time: "yesterday" },
-  ]);
+  const [models, setModels] = useState([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState("");
+  const [recentActivity, setRecentActivity] = useState([]);
   const [actionLoading, setActionLoading] = useState(null); // id+action e.g. "1-sign"
+
+  async function loadModels() {
+    setModelsError("");
+    setModelsLoading(true);
+    try {
+      const data = await listModels(token);
+      setModels(
+        (data.items || []).map((m) => ({
+          id: String(m.id),
+          name: m.filename,
+          type: m.is_encrypted ? "encrypted" : "plain",
+          created_at: m.created_at,
+        }))
+      );
+    } catch (e) {
+      setModelsError(e.message || "Failed to load models");
+      setModels([]);
+    } finally {
+      setModelsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (token) loadModels();
+  }, [token]);
 
   async function handleUpload(e) {
     e.preventDefault();
@@ -53,13 +74,13 @@ function Dashboard({ me, token }) {
     setSuccess("");
     setLoading(true);
     try {
-      const res = await uploadModel(file, token);
+      await uploadModel(file, token);
       setSuccess("Model uploaded successfully");
       setRecentActivity((prev) => [
         { text: `Uploaded ${file.name}`, time: "just now" },
-        ...prev,
+        ...prev.slice(0, 4),
       ]);
-      console.log("Uploaded model:", res);
+      await loadModels();
     } catch (e) {
       setErr(e.message || "Upload failed");
     } finally {
@@ -71,26 +92,53 @@ function Dashboard({ me, token }) {
     const key = `${id}-${action}`;
     setActionLoading(key);
     setErr("");
+    const modelId = Number(id);
     try {
-      const blob = await getModel(id, token);
-      const fd = new FormData();
-      fd.append("model", blob, modelName);
       if (action === "Encrypt") {
-        const recipient = window.prompt("Recipient user id or username?");
-        if (recipient) fd.append("recipient", recipient);
+        const recipient_id = window.prompt("Recipient user id or username?");
+        if (!recipient_id?.trim()) {
+          setActionLoading(null);
+          return;
+        }
+        await encryptModel(token, { model_id: modelId, recipient_id: recipient_id.trim() });
+        setRecentActivity((prev) => [
+          { text: `Encrypted ${modelName} for ${recipient_id}`, time: "just now" },
+          ...prev.slice(0, 4),
+        ]);
+      } else if (action === "Decrypt") {
+        await decryptModel(token, { model_id: modelId });
+        setRecentActivity((prev) => [
+          { text: `Decrypted ${modelName}`, time: "just now" },
+          ...prev.slice(0, 4),
+        ]);
+      } else if (action === "Sign") {
+        const res = await signModel(token, { model_id: modelId });
+        setRecentActivity((prev) => [
+          { text: `Signed ${modelName}`, time: "just now" },
+          ...prev.slice(0, 4),
+        ]);
+        if (res?.signature_b64) {
+          window.alert(`Signature (base64):\n${res.signature_b64.slice(0, 80)}...\n\nCopy from DevTools or use for Verify.`);
+        }
+      } else if (action === "Verify") {
+        const signer_id = window.prompt("Signer user id or username?");
+        const signature_b64 = window.prompt("Paste signature (base64):");
+        if (!signer_id?.trim() || !signature_b64?.trim()) {
+          setActionLoading(null);
+          return;
+        }
+        const res = await verifyModel(token, {
+          model_id: modelId,
+          signature_b64: signature_b64.trim(),
+          signer_id: signer_id.trim(),
+        });
+        window.alert(res?.valid ? "Signature is valid." : "Signature is invalid.");
+        setRecentActivity((prev) => [
+          { text: `Verified ${modelName} (${res?.valid ? "valid" : "invalid"})`, time: "just now" },
+          ...prev.slice(0, 4),
+        ]);
       }
-      if (action === "Sign") await signModel(token, fd);
-      else if (action === "Decrypt") await decryptModel(token, fd);
-      else if (action === "Encrypt") await encryptModel(token, fd);
-      else if (action === "Verify") {
-        const signer = window.prompt("Signer user id or username?");
-        if (signer) fd.append("signer", signer);
-        await verifyModel(token, fd);
-      }
-      setRecentActivity((prev) => [
-        { text: `${action} on ${modelName}`, time: "just now" },
-        ...prev.slice(0, 4),
-      ]);
+      await loadModels();
     } catch (e) {
       setErr(e.message || `${action} failed`);
     } finally {
@@ -101,7 +149,6 @@ function Dashboard({ me, token }) {
   function getModelActions(m) {
     if (m.type === "plain") return ["Encrypt", "Sign"];
     if (m.type === "encrypted") return ["Decrypt", "Verify"];
-    if (m.type === "signed") return ["Encrypt", "Share"];
     return ["Encrypt", "Sign", "Decrypt", "Verify"];
   }
 
@@ -274,6 +321,14 @@ function Dashboard({ me, token }) {
       {/* Your Models */}
       <div className="mb-8">
         <div className="text-sm font-medium text-gray-200 mb-3">Your Models</div>
+        {modelsError && (
+          <div className="text-red-400 text-sm mb-2">{modelsError}</div>
+        )}
+        {modelsLoading ? (
+          <p className="text-gray-400 text-sm">Loading models…</p>
+        ) : models.length === 0 ? (
+          <p className="text-gray-400 text-sm">No models yet. Upload one above.</p>
+        ) : (
         <ul className="space-y-3">
           {models.map((m) => (
             <li
@@ -283,10 +338,12 @@ function Dashboard({ me, token }) {
               <div className="flex items-center gap-2">
                 {m.type === "plain" && <span>📄</span>}
                 {m.type === "encrypted" && <span>🔒</span>}
-                {m.type === "signed" && <span>✅</span>}
                 <span className="text-gray-200">{m.name}</span>
-                {m.label && <span className="text-gray-500 text-xs">{m.label}</span>}
-                <span className="text-gray-500 text-xs">{m.size}</span>
+                {m.created_at && (
+                  <span className="text-gray-500 text-xs">
+                    {new Date(m.created_at).toLocaleDateString()}
+                  </span>
+                )}
               </div>
               <div className="flex gap-2">
                 {getModelActions(m).map((action) => (
@@ -303,6 +360,7 @@ function Dashboard({ me, token }) {
             </li>
           ))}
         </ul>
+        )}
       </div>
 
       {/* Recent Activity */}
@@ -336,11 +394,17 @@ useEffect(() => {
     try {
       const data = await getMe(token);
       setMe(data);
-    } catch {
+    } catch (e) {
       setMe(null);
+      if (e instanceof ApiError && e.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user_id");
+        setToken("");
+        navigate("/login", { state: { message: "Session expired. Please sign in again." } });
+      }
     }
   })();
-}, [token]);
+}, [token, navigate]);
 
   function handleAuthSuccess() {
     const t = localStorage.getItem("token") || "";

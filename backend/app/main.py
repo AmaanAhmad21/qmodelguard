@@ -4,8 +4,9 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 load_dotenv()
 
@@ -56,6 +57,22 @@ app.add_middleware(
 app.include_router(keys.router, prefix="/api/keys", tags=["keys"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Return 500 with a safe message; log the real error."""
+    logger.exception("Unhandled error: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Please try again later."},
+    )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Avoid 404 when browser requests favicon (e.g. opening API root)."""
+    return Response(status_code=204)
 
 
 @app.get("/")
