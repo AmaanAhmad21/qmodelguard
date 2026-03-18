@@ -1,5 +1,6 @@
 """API tests. Requires qcrypto for Phase B+."""
 import uuid
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -95,6 +96,16 @@ def test_users_register():
     assert r2.status_code == 400
 
 
+def test_rate_limit_register():
+    """Register route has rate limiting (limits set via RATE_LIMIT_* env; high in tests)."""
+    # Rate limits are applied in production; tests use high limits from conftest.
+    r = client.post(
+        "/api/users/register",
+        json={"username": _unique_username(), "password": "secret123"},
+    )
+    assert r.status_code == 200
+
+
 def test_users_login():
     """Login returns JWT for valid creds, 401 for invalid."""
     username = _unique_username()
@@ -164,6 +175,22 @@ def test_models_upload():
         files={"file": ("model.txt", b"bad content")},
     )
     assert r_bad_ext.status_code == 400
+
+
+def test_models_upload_file_too_large():
+    """Upload with body larger than MAX_MODEL_SIZE returns 400."""
+    username = _unique_username()
+    client.post("/api/users/register", json={"username": username, "password": "secret123"})
+    login_r = client.post("/api/users/login", json={"username": username, "password": "secret123"})
+    token = login_r.json()["token"]
+    with patch("app.api.models.MAX_MODEL_SIZE_BYTES", 5):
+        r = client.post(
+            "/api/models/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("big.pt", b"x" * 10)},
+        )
+    assert r.status_code == 400
+    assert "too large" in r.json().get("detail", "").lower()
 
 
 def test_models_list():

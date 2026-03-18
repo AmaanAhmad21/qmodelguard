@@ -1,15 +1,19 @@
 """User auth endpoints."""
+import os
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import create_access_token, get_current_user
 from app.db.database import get_db
 from app.db.models import User
+from app.limiter import limiter
 from app.services import key_store
 
 router = APIRouter()
+_REGISTER_LIMIT = os.getenv("RATE_LIMIT_REGISTER", "10/minute")
+_LOGIN_LIMIT = os.getenv("RATE_LIMIT_LOGIN", "10/minute")
 
 
 class RegisterRequest(BaseModel):
@@ -39,7 +43,9 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
 
 @router.post("/register", response_model=AuthResponse)
+@limiter.limit(_REGISTER_LIMIT)
 def register(
+    request: Request,
     body: RegisterRequest,
     db: Session = Depends(get_db),
 ):
@@ -57,7 +63,9 @@ def register(
 
 
 @router.post("/login", response_model=AuthResponse)
+@limiter.limit(_LOGIN_LIMIT)
 def login(
+    request: Request,
     body: LoginRequest,
     db: Session = Depends(get_db),
 ):

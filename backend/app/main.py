@@ -7,12 +7,16 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
 from app.api import keys, models, users
 from app.db.database import init_db, DB_PATH
+from app.limiter import limiter
 from app.services.storage import ensure_storage_dir, get_storage_path
+from app import auth
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +31,11 @@ CORS_ORIGINS = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: ensure paths exist, init DB safely. Shutdown: cleanup if needed."""
+    if auth.SECRET_KEY == "dev-secret-change-in-production":
+        logger.warning(
+            "JWT_SECRET is using the insecure default value. "
+            "Set JWT_SECRET in backend/.env before deploying or demoing."
+        )
     ensure_storage_dir()
     logger.info("DB path: %s", DB_PATH.resolve())
     logger.info("Storage path: %s", get_storage_path())
@@ -45,6 +54,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,15 +88,28 @@ def favicon():
 
 @app.get("/")
 def root():
-    """Root info."""
-    return {"status": "ok", "app": "QModelGuard"}
+    """Root info for slides and API discovery."""
+    return {
+        "status": "ok",
+        "app": "QModelGuard",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
 
 
 @app.get("/health")
 def health():
-    """Health check: status, DB connectivity, storage dir writable."""
+    """Health check: status, DB, storage, and crypto mode (real PQC vs stub)."""
     from sqlalchemy import text
-    out = {"status": "ok"}
+
+    from app.services import qcrypto
+
+    out = {
+        "status": "ok",
+        "crypto": "real" if qcrypto.QCRYPTO_AVAILABLE else "stub",
+        "algorithms": {"kem": qcrypto.KEM_ALG, "sig": qcrypto.SIG_ALG},
+    }
     try:
         from app.db.database import engine
         with engine.connect() as conn:

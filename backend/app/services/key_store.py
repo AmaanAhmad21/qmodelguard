@@ -1,8 +1,50 @@
-"""Key storage: persist and retrieve keypairs from DB."""
+"""Key storage: persist and retrieve keypairs from DB.
+
+Private keys can be encrypted at rest if KEY_ENCRYPTION_KEY is set (Fernet key, base64url).
+Stored format: plain base64 (legacy) or "v2:" + base64(Fernet ciphertext) for new keys.
+"""
+import logging
+import os
 from sqlalchemy.orm import Session
 
 from app.db.models import KeyPair
 from app.services import qcrypto
+
+logger = logging.getLogger(__name__)
+
+_PRIV_KEY_PREFIX = "v2:"
+
+
+def _get_fernet():
+    """Return Fernet instance if KEY_ENCRYPTION_KEY is set, else None (store plain)."""
+    key = os.getenv("KEY_ENCRYPTION_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(key.encode() if isinstance(key, str) else key)
+    except Exception as e:
+        logger.warning("Invalid KEY_ENCRYPTION_KEY, private keys will not be encrypted: %s", e)
+        return None
+
+
+def _encrypt_private_key(priv_b64: str) -> str:
+    """Encrypt private key for storage. Returns 'v2:' + ciphertext or plain if no key."""
+    fernet = _get_fernet()
+    if fernet is None:
+        return priv_b64
+    return _PRIV_KEY_PREFIX + fernet.encrypt(priv_b64.encode()).decode()
+
+
+def _decrypt_private_key(stored: str) -> str:
+    """Decrypt stored private key if v2 format, else return as-is (legacy)."""
+    if not stored.startswith(_PRIV_KEY_PREFIX):
+        return stored
+    fernet = _get_fernet()
+    if fernet is None:
+        logger.warning("KEY_ENCRYPTION_KEY not set but DB has encrypted key; cannot decrypt")
+        raise ValueError("Key was encrypted but KEY_ENCRYPTION_KEY is not set")
+    return fernet.decrypt(stored[len(_PRIV_KEY_PREFIX):].encode()).decode()
 
 
 def store_keypairs_for_user(db: Session, user_id: int) -> None:
@@ -16,20 +58,21 @@ def store_keypairs_for_user(db: Session, user_id: int) -> None:
 
 
 def _upsert(db: Session, user_id: int, key_type: str, pub_b64: str, priv_b64: str) -> int:
+    stored_priv = _encrypt_private_key(priv_b64)
     existing = db.query(KeyPair).filter(
         KeyPair.user_id == user_id,
         KeyPair.key_type == key_type,
     ).first()
     if existing:
         existing.public_key = pub_b64
-        existing.private_key = priv_b64
+        existing.private_key = stored_priv
         db.commit()
         return existing.id
     kp = KeyPair(
         user_id=user_id,
         key_type=key_type,
         public_key=pub_b64,
-        private_key=priv_b64,
+        private_key=stored_priv,
     )
     db.add(kp)
     db.commit()
@@ -62,9 +105,16 @@ def get_user_public_keys(db: Session, user_id: int) -> dict | None:
 
 
 def get_user_private_key(db: Session, user_id: int, key_type: str) -> str | None:
-    """Get private key for user (kem or sig). Returns base64 string or None."""
+    """Get private key for user (kem or sig). Returns base64 string or None.
+    Decrypts if stored in v2 encrypted form.
+    """
     row = db.query(KeyPair).filter(
         KeyPair.user_id == user_id,
         KeyPair.key_type == key_type,
     ).first()
-    return row.private_key if row else None
+    if not row:
+        return None
+    try:
+        return _decrypt_private_key(row.private_key)
+    except ValueError:
+        raise
