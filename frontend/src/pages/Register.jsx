@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { register } from "../api";
+import Mark from "../assets/qmodelguard-mark.svg";
 
 export default function Register({ onSuccess }) {
   const [username, setUsername] = useState("");
@@ -14,7 +15,7 @@ export default function Register({ onSuccess }) {
     setLoading(true);
 
     try {
-      const data = await register(username, password); // { token, user_id }
+      const data = await register(username, password);
       localStorage.setItem("token", data.token);
       localStorage.setItem("user_id", data.user_id);
       onSuccess?.();
@@ -26,53 +27,61 @@ export default function Register({ onSuccess }) {
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)] w-full flex items-center justify-center px-6 bg-gray-50">
-      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-md text-left">
-        <h1 className="text-2xl font-bold text-gray-900">Register</h1>
-        <p className="text-sm text-gray-600 mt-1">Create an account. Use a strong, unique password.</p>
+    <div className="w-full max-w-[420px] mx-auto text-left">
+      <div className="flex items-center gap-3 mb-8">
+        <img src={Mark} alt="QModelGuard" className="h-10 w-10" />
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-gray-100">Create account</h1>
+          <p className="text-sm text-gray-500">Quantum-safe model protection</p>
+        </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Username</label>
             <input
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-gray-100 placeholder-gray-500 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-colors"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              placeholder="Choose username"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Password</label>
             <input
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-gray-100 placeholder-gray-500 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition-colors"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="Choose a strong password"
               required
             />
           </div>
 
           {err && (
-            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700" role="alert">
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-2.5 text-sm text-red-300" role="alert">
               {err}
             </div>
           )}
 
           <button
             disabled={loading}
-            className="w-full rounded-lg bg-indigo-600 text-white py-2.5 font-medium hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 transition-colors"
+            className="w-full rounded-xl bg-cyan-500 text-gray-900 py-3 font-medium hover:bg-cyan-400 focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-50 transition-colors"
             type="submit"
           >
-            {loading ? "Creating..." : "Register"}
+            {loading ? "Creating…" : "Create account"}
           </button>
-
-          <div className="text-sm text-center opacity-80">
-            <Link className="underline" to="/login">
-              Already have an account? Login
-            </Link>
-          </div>
         </form>
+
+        <p className="mt-5 text-center text-sm text-gray-500">
+          Already have an account?{" "}
+          <Link to="/login" className="text-cyan-400 hover:text-cyan-300">
+            Sign in
+          </Link>
+        </p>
       </div>
     </div>
   );

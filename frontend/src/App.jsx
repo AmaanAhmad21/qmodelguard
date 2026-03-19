@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Routes, Route, Navigate, Link, useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { ApiError } from "./api";
+import Mark from "./assets/qmodelguard-mark.svg";
 import {
   getMe,
   listModels,
@@ -11,18 +12,120 @@ import {
   getPublicKeys,
   getPublicKeyById,
   getModel,
+  deleteModel,
   signModel,
   decryptModel,
   encryptModel,
   verifyModel,
+  listUsers,
 } from "./api";
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function IconBadge({ children, tone = "neutral" }) {
+  const cls =
+    tone === "good"
+      ? "border-green-700/60 bg-green-900/20 text-green-100"
+      : tone === "warn"
+        ? "border-yellow-700/60 bg-yellow-900/20 text-yellow-100"
+        : tone === "bad"
+          ? "border-red-700/60 bg-red-900/20 text-red-100"
+          : "border-gray-700 bg-black/20 text-gray-200";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${cls}`}>
+      {children}
+    </span>
+  );
+}
+
+function Brand({ size = "sm" }) {
+  const isSm = size === "sm";
+  return (
+    <div className="flex items-center gap-3">
+      <img src={Mark} alt="QModelGuard" className={isSm ? "h-9 w-9" : "h-10 w-10"} />
+      <div className="leading-tight">
+        <div className={`font-semibold tracking-tight text-gray-100 ${isSm ? "text-sm" : "text-lg"}`}>QModelGuard</div>
+        <div className="text-xs text-gray-500">Quantum-safe model protection</div>
+      </div>
+    </div>
+  );
+}
+
+function GlassCard({ className = "", children }) {
+  return (
+    <div className={`rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function Modal({ open, title, description, children, onClose }) {
+  const closeBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    closeBtnRef.current?.focus();
+    return () => prev?.focus?.();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative w-full max-w-lg rounded-xl border border-gray-700 bg-[#151515] shadow-2xl">
+        <div className="flex items-start justify-between gap-4 p-4 border-b border-gray-800">
+          <div>
+            <div className="text-base font-semibold text-gray-100">{title}</div>
+            {description ? <div className="mt-1 text-sm text-gray-400">{description}</div> : null}
+          </div>
+          <button
+            ref={closeBtnRef}
+            onClick={onClose}
+            className="rounded-md border border-gray-700 px-2 py-1 text-xs text-gray-200 hover:bg-gray-800"
+          >
+            Close
+          </button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 function Dashboard({ me, token }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [success, setSuccess] = useState("");
   const [activeSection, setActiveSection] = useState("models");
+  const [toasts, setToasts] = useState([]);
+
+  function toast(message, tone = "neutral") {
+    const id = crypto?.randomUUID?.() || String(Date.now() + Math.random());
+    setToasts((prev) => [{ id, message, tone }, ...prev].slice(0, 4));
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  }
 
   // My Keys state
   const [keysLoading, setKeysLoading] = useState(false);
@@ -35,18 +138,36 @@ function Dashboard({ me, token }) {
   const [userKeyLoading, setUserKeyLoading] = useState(false);
   const [userKeyError, setUserKeyError] = useState("");
   const [userKeyResult, setUserKeyResult] = useState(null);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [users, setUsers] = useState([]);
 
   const [models, setModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState("");
   const [recentActivity, setRecentActivity] = useState([]);
   const [actionLoading, setActionLoading] = useState(null); // id+action e.g. "1-sign"
+  const [signatureDraft, setSignatureDraft] = useState(""); // last signature for easy copy/verify
+  const [modelSearch, setModelSearch] = useState("");
+  const [pageLimit, setPageLimit] = useState(25);
+  const [pageOffset, setPageOffset] = useState(0);
+  const [modelsTotal, setModelsTotal] = useState(0);
+
+  const [modal, setModal] = useState(null); // { type, model }
+  const [modalRecipient, setModalRecipient] = useState("");
+  const [modalSigner, setModalSigner] = useState("");
+  const [modalSignature, setModalSignature] = useState("");
+
+  // Health banner (crypto mode)
+  const [health, setHealth] = useState(null);
+  const [healthError, setHealthError] = useState("");
 
   async function loadModels() {
     setModelsError("");
     setModelsLoading(true);
     try {
-      const data = await listModels(token);
+      const data = await listModels(token, pageLimit, pageOffset);
+      setModelsTotal(Number(data.total || 0));
       setModels(
         (data.items || []).map((m) => ({
           id: String(m.id),
@@ -65,21 +186,36 @@ function Dashboard({ me, token }) {
 
   useEffect(() => {
     if (token) loadModels();
+  }, [token, pageLimit, pageOffset]);
+
+  useEffect(() => {
+    if (!token) return;
+    setHealthError("");
+    (async () => {
+      try {
+        const res = await fetch("/health");
+        const data = await res.json().catch(() => null);
+        if (res.ok) setHealth(data);
+        else setHealthError("Health check failed");
+      } catch (e) {
+        setHealthError(e?.message || "Health check failed");
+      }
+    })();
   }, [token]);
 
   async function handleUpload(e) {
     e.preventDefault();
     if (!file) return;
     setErr("");
-    setSuccess("");
     setLoading(true);
     try {
       await uploadModel(file, token);
-      setSuccess("Model uploaded successfully");
+      toast("Model uploaded.", "good");
       setRecentActivity((prev) => [
         { text: `Uploaded ${file.name}`, time: "just now" },
         ...prev.slice(0, 4),
       ]);
+      setActiveSection("models");
       await loadModels();
     } catch (e) {
       setErr(e.message || "Upload failed");
@@ -88,6 +224,12 @@ function Dashboard({ me, token }) {
     }
   }
 
+  const filteredModels = useMemo(() => {
+    const q = modelSearch.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((m) => m.name.toLowerCase().includes(q) || m.id.includes(q));
+  }, [models, modelSearch]);
+
   async function handleModelAction(id, action, modelName, modelType) {
     const key = `${id}-${action}`;
     setActionLoading(key);
@@ -95,18 +237,12 @@ function Dashboard({ me, token }) {
     const modelId = Number(id);
     try {
       if (action === "Encrypt") {
-        const recipient_id = window.prompt("Recipient user id or username?");
-        if (!recipient_id?.trim()) {
-          setActionLoading(null);
-          return;
-        }
-        await encryptModel(token, { model_id: modelId, recipient_id: recipient_id.trim() });
-        setRecentActivity((prev) => [
-          { text: `Encrypted ${modelName} for ${recipient_id}`, time: "just now" },
-          ...prev.slice(0, 4),
-        ]);
+        setModal({ type: "encrypt", model: { id, name: modelName } });
+        setModalRecipient("");
+        return;
       } else if (action === "Decrypt") {
         await decryptModel(token, { model_id: modelId });
+        toast("Decrypted model created.", "good");
         setRecentActivity((prev) => [
           { text: `Decrypted ${modelName}`, time: "just now" },
           ...prev.slice(0, 4),
@@ -118,25 +254,25 @@ function Dashboard({ me, token }) {
           ...prev.slice(0, 4),
         ]);
         if (res?.signature_b64) {
-          window.alert(`Signature (base64):\n${res.signature_b64.slice(0, 80)}...\n\nCopy from DevTools or use for Verify.`);
+          setSignatureDraft(res.signature_b64);
+          toast("Signature generated. Copy it below.", "good");
         }
       } else if (action === "Verify") {
-        const signer_id = window.prompt("Signer user id or username?");
-        const signature_b64 = window.prompt("Paste signature (base64):");
-        if (!signer_id?.trim() || !signature_b64?.trim()) {
-          setActionLoading(null);
-          return;
-        }
-        const res = await verifyModel(token, {
-          model_id: modelId,
-          signature_b64: signature_b64.trim(),
-          signer_id: signer_id.trim(),
-        });
-        window.alert(res?.valid ? "Signature is valid." : "Signature is invalid.");
+        setModal({ type: "verify", model: { id, name: modelName } });
+        setModalSigner("");
+        setModalSignature(signatureDraft || "");
+        return;
+      } else if (action === "Download") {
+        const blob = await getModel(modelId, token);
+        downloadBlob(blob, modelName);
+        toast("Download started.", "neutral");
         setRecentActivity((prev) => [
-          { text: `Verified ${modelName} (${res?.valid ? "valid" : "invalid"})`, time: "just now" },
+          { text: `Downloaded ${modelName}`, time: "just now" },
           ...prev.slice(0, 4),
         ]);
+      } else if (action === "Delete") {
+        setModal({ type: "delete", model: { id, name: modelName } });
+        return;
       }
       await loadModels();
     } catch (e) {
@@ -147,234 +283,600 @@ function Dashboard({ me, token }) {
   }
 
   function getModelActions(m) {
-    if (m.type === "plain") return ["Encrypt", "Sign"];
-    if (m.type === "encrypted") return ["Decrypt", "Verify"];
-    return ["Encrypt", "Sign", "Decrypt", "Verify"];
+    if (m.type === "plain") return ["Download", "Encrypt", "Sign", "Delete"];
+    if (m.type === "encrypted") return ["Download", "Decrypt", "Delete"];
+    return ["Download", "Encrypt", "Sign", "Decrypt", "Verify", "Delete"];
   }
 
   return (
-    <div className="w-full max-w-4xl rounded-lg border border-gray-600 bg-[#1e1e1e] p-6 text-gray-100 overflow-y-auto">
+    <>
+      <div className="w-full max-w-6xl">
       {err && (
-        <div className="mb-4 p-2 rounded bg-red-900/30 border border-red-600 text-red-300 text-sm">
+        <div className="mb-4 p-3 rounded-xl bg-red-900/20 border border-red-600/40 text-red-200 text-sm">
           {err}
         </div>
       )}
-      {/* Nav buttons */}
-      <div className="flex gap-4 mb-8">
-        <button
-          onClick={() => setActiveSection("upload")}
-          className={`flex items-center gap-2 px-4 py-3 rounded border transition ${
-            activeSection === "upload"
-              ? "border-gray-400 bg-gray-700"
-              : "border-gray-600 hover:border-gray-500"
-          }`}
-        >
-          <span>📤</span>
-          Upload Model
-        </button>
-        <button
-          onClick={() => setActiveSection("keys")}
-          className={`flex items-center gap-2 px-4 py-3 rounded border transition ${
-            activeSection === "keys"
-              ? "border-gray-400 bg-gray-700"
-              : "border-gray-600 hover:border-gray-500"
-          }`}
-        >
-          <span>🔑</span>
-          My Keys
-        </button>
-        <button
-          onClick={() => setActiveSection("users")}
-          className={`flex items-center gap-2 px-4 py-3 rounded border transition ${
-            activeSection === "users"
-              ? "border-gray-400 bg-gray-700"
-              : "border-gray-600 hover:border-gray-500"
-          }`}
-        >
-          <span>👥</span>
-          Users
-        </button>
+
+      <div className="fixed right-4 top-4 z-40 space-y-2">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`min-w-64 max-w-sm rounded-lg border px-3 py-2 text-sm shadow-lg backdrop-blur ${
+              t.tone === "good"
+                ? "border-green-700/60 bg-green-900/30 text-green-100"
+                : t.tone === "bad"
+                  ? "border-red-700/60 bg-red-900/30 text-red-100"
+                  : "border-gray-700 bg-black/40 text-gray-200"
+            }`}
+          >
+            {t.message}
+          </div>
+        ))}
       </div>
 
-      {/* Upload section (shown when Upload Model clicked) */}
-      {activeSection === "upload" && (
-        <form onSubmit={handleUpload} className="mb-8 space-y-3">
-          <div className="text-sm font-medium text-gray-200">Upload Model</div>
-          <input
-            type="file"
-            accept=".pt,.onnx,.h5,.safetensors"
-            onChange={(e) => setFile(e.target.files[0] || null)}
-            className="text-sm text-gray-300"
-          />
-          {err && <div className="text-sm text-red-400">{err}</div>}
-          {success && <div className="text-sm text-green-400">{success}</div>}
-          <button
-            type="submit"
-            disabled={loading || !file}
-            className="rounded border border-gray-500 bg-gray-700 px-4 py-2 text-sm disabled:opacity-50 hover:bg-gray-600"
-          >
-            {loading ? "Uploading..." : "Upload"}
-          </button>
-        </form>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+        {/* Sidebar */}
+        <div>
+          <GlassCard className="p-4">
+            <Brand />
 
-      {activeSection === "keys" && (
-        <div className="mb-8 text-sm">
-          <div className="font-medium text-gray-200 mb-2">My Keys</div>
-          {keysError && <div className="text-red-400 mb-2">{keysError}</div>}
-          <div className="flex flex-wrap gap-4 items-start">
-            <button
-              disabled={generateLoading}
-              onClick={async () => {
-                setKeysError("");
-                setGenerateLoading(true);
-                try {
-                  await generateKeys(token);
-                  const data = await getPublicKeys(token);
-                  setPublicKeyInfo(data);
-                  setRecentActivity((prev) => [
-                    { text: "Generated new keypair", time: "just now" },
-                    ...prev.slice(0, 4),
-                  ]);
-                } catch (e) {
-                  setKeysError(e.message || "Failed to generate keys");
-                } finally {
-                  setGenerateLoading(false);
-                }
-              }}
-              className="rounded border border-gray-500 bg-gray-700 px-4 py-2 hover:bg-gray-600 disabled:opacity-50"
-            >
-              {generateLoading ? "Generating…" : "Generate my keys"}
-            </button>
-            <button
-              disabled={keysLoading}
-              onClick={async () => {
-                setKeysError("");
-                setKeysLoading(true);
-                try {
-                  const data = await getPublicKeys(token);
-                  setPublicKeyInfo(data);
-                } catch (e) {
-                  setKeysError(e.message || "Failed to load keys");
-                } finally {
-                  setKeysLoading(false);
-                }
-              }}
-              className="rounded border border-gray-500 bg-gray-700 px-4 py-2 hover:bg-gray-600 disabled:opacity-50"
-            >
-              {keysLoading ? "Loading…" : "Refresh my public key"}
-            </button>
-          </div>
-          {publicKeyInfo && (
-            <div className="mt-4 p-3 rounded border border-gray-600 bg-black/30 text-gray-300 font-mono text-xs break-all">
-              {typeof publicKeyInfo === "string"
-                ? publicKeyInfo
-                : JSON.stringify(publicKeyInfo, null, 2)}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeSection === "users" && (
-        <div className="mb-8 text-sm">
-          <div className="font-medium text-gray-200 mb-2">Users</div>
-          <p className="text-gray-400 mb-2">Get another user&apos;s public key by id or username.</p>
-          {userKeyError && <div className="text-red-400 mb-2">{userKeyError}</div>}
-          <div className="flex gap-2 items-center flex-wrap">
-            <input
-              type="text"
-              placeholder="User id or username"
-              value={userLookupId}
-              onChange={(e) => setUserLookupId(e.target.value)}
-              className="rounded border border-gray-600 bg-gray-800 px-3 py-2 text-gray-200 placeholder-gray-500 w-48"
-            />
-            <button
-              disabled={userKeyLoading || !userLookupId.trim()}
-              onClick={async () => {
-                setUserKeyError("");
-                setUserKeyResult(null);
-                setUserKeyLoading(true);
-                try {
-                  const data = await getPublicKeyById(userLookupId.trim());
-                  setUserKeyResult(data);
-                } catch (e) {
-                  setUserKeyError(e.message || "Failed to load key");
-                } finally {
-                  setUserKeyLoading(false);
-                }
-              }}
-              className="rounded border border-gray-500 bg-gray-700 px-4 py-2 hover:bg-gray-600 disabled:opacity-50"
-            >
-              {userKeyLoading ? "Loading…" : "Get public key"}
-            </button>
-          </div>
-          {userKeyResult && (
-            <div className="mt-4 p-3 rounded border border-gray-600 bg-black/30 text-gray-300 font-mono text-xs break-all">
-              {typeof userKeyResult === "string"
-                ? userKeyResult
-                : JSON.stringify(userKeyResult, null, 2)}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Your Models */}
-      <div className="mb-8">
-        <div className="text-sm font-medium text-gray-200 mb-3">Your Models</div>
-        {modelsError && (
-          <div className="text-red-400 text-sm mb-2">{modelsError}</div>
-        )}
-        {modelsLoading ? (
-          <p className="text-gray-400 text-sm">Loading models…</p>
-        ) : models.length === 0 ? (
-          <p className="text-gray-400 text-sm">No models yet. Upload one above.</p>
-        ) : (
-        <ul className="space-y-3">
-          {models.map((m) => (
-            <li
-              key={m.id}
-              className="flex items-center justify-between py-2 border-b border-gray-600"
-            >
-              <div className="flex items-center gap-2">
-                {m.type === "plain" && <span>📄</span>}
-                {m.type === "encrypted" && <span>🔒</span>}
-                <span className="text-gray-200">{m.name}</span>
-                {m.created_at && (
-                  <span className="text-gray-500 text-xs">
-                    {new Date(m.created_at).toLocaleDateString()}
-                  </span>
+            <div className="mt-4 space-y-2">
+              <div className="text-xs text-gray-400">Session</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <IconBadge>
+                  <span className="text-gray-400">User</span>
+                  <span className="text-gray-100 font-medium">{me?.username || "User"}</span>
+                </IconBadge>
+                {health ? (
+                  <IconBadge tone={health.crypto === "real" ? "good" : "warn"}>
+                    <span className="text-gray-300">Crypto</span>
+                    <span className="font-medium">{health.crypto || "unknown"}</span>
+                  </IconBadge>
+                ) : (
+                  <IconBadge tone="warn">{healthError ? "Health unavailable" : "Health…"}</IconBadge>
                 )}
               </div>
-              <div className="flex gap-2">
-                {getModelActions(m).map((action) => (
-                  <button
-                    key={action}
-                    disabled={actionLoading === `${m.id}-${action}`}
-                    onClick={() => handleModelAction(m.id, action, m.name, m.type)}
-                    className="px-2 py-1 rounded border border-gray-500 text-xs hover:bg-gray-700 disabled:opacity-50"
-                  >
-                    {actionLoading === `${m.id}-${action}` ? "…" : action}
-                  </button>
-                ))}
+              {health?.algorithms?.kem && health?.algorithms?.sig ? (
+                <div className="text-xs text-gray-500 mt-1">
+                  {health.algorithms.kem} • {health.algorithms.sig}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-6 space-y-2">
+              <div className="text-xs text-gray-400">Navigation</div>
+              {[
+                { id: "models", label: "Models", sub: "Manage, encrypt, verify", icon: "🗂️" },
+                { id: "upload", label: "Upload", sub: "Add a new model file", icon: "📤" },
+                { id: "keys", label: "Keys", sub: "View & rotate keys", icon: "🔑" },
+                { id: "users", label: "Users", sub: "Recipients & public keys", icon: "👥" },
+              ].map((x) => (
+                <button
+                  key={x.id}
+                  onClick={() => setActiveSection(x.id)}
+                  className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                    activeSection === x.id
+                      ? "border-white/15 bg-white/[0.06]"
+                      : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5">{x.icon}</div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-100">{x.label}</div>
+                      <div className="text-xs text-gray-400">{x.sub}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+          </GlassCard>
+        </div>
+
+        {/* Main content */}
+        <div className="space-y-6">
+          {activeSection === "upload" && (
+            <GlassCard className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-gray-100">Upload model</div>
+                  <div className="text-sm text-gray-400">Allowed: .pt, .safetensors, .onnx, .h5</div>
+                </div>
+                <div className="hidden sm:block text-xs text-gray-500">Stored locally, tied to your account</div>
               </div>
-            </li>
-          ))}
-        </ul>
-        )}
+              <form onSubmit={handleUpload} className="mt-4 flex flex-col sm:flex-row gap-3 sm:items-center">
+                <input
+                  type="file"
+                  accept=".pt,.onnx,.h5,.safetensors"
+                  onChange={(e) => setFile(e.target.files[0] || null)}
+                  className="w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border file:border-white/10 file:bg-white/[0.06] file:px-3 file:py-2 file:text-sm file:text-gray-100 hover:file:bg-white/[0.09]"
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !file}
+                  className="rounded-xl bg-cyan-500 text-gray-900 px-4 py-2 text-sm font-medium hover:bg-cyan-400 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? "Uploading…" : "Upload"}
+                </button>
+              </form>
+            </GlassCard>
+          )}
+
+          {activeSection === "models" && (
+            <GlassCard className="p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-gray-100">Models</div>
+                  <div className="text-sm text-gray-400">Download, encrypt, decrypt, sign and verify.</div>
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <input
+                    value={modelSearch}
+                    onChange={(e) => setModelSearch(e.target.value)}
+                    placeholder="Search by name or id…"
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-gray-100 placeholder-gray-500"
+                  />
+                  <button
+                    onClick={() => loadModels()}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.07]"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+                {modelsLoading ? (
+                  <div className="p-4 text-sm text-gray-400">Loading models…</div>
+                ) : filteredModels.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-400">No models yet. Upload one to get started.</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-white/[0.04] text-gray-300">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium">Name</th>
+                        <th className="px-4 py-3 text-left font-medium">Type</th>
+                        <th className="px-4 py-3 text-left font-medium">Created</th>
+                        <th className="px-4 py-3 text-right font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {filteredModels.map((m) => (
+                        <tr key={m.id} className="hover:bg-white/[0.03]">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500">#{m.id}</span>
+                              <span className="font-medium text-gray-100">{m.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            {m.type === "encrypted" ? (
+                              <IconBadge tone="warn">Encrypted</IconBadge>
+                            ) : (
+                              <IconBadge tone="good">Plain</IconBadge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-400">
+                            {m.created_at ? new Date(m.created_at).toLocaleString() : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              {getModelActions(m).map((action) => (
+                                <button
+                                  key={action}
+                                  disabled={actionLoading === `${m.id}-${action}`}
+                                  onClick={() => handleModelAction(m.id, action, m.name, m.type)}
+                                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-100 hover:bg-white/[0.08] disabled:opacity-50"
+                                >
+                                  {actionLoading === `${m.id}-${action}` ? "…" : action}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-400">
+                <div>
+                  Showing <span className="text-gray-100">{Math.min(pageOffset + 1, modelsTotal || 0)}</span>–
+                  <span className="text-gray-100">{Math.min(pageOffset + pageLimit, modelsTotal || 0)}</span> of{" "}
+                  <span className="text-gray-100">{modelsTotal}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={pageLimit}
+                    onChange={(e) => {
+                      setPageLimit(Number(e.target.value));
+                      setPageOffset(0);
+                    }}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-gray-100"
+                  >
+                    {[10, 25, 50, 100].map((n) => (
+                      <option key={n} value={n}>
+                        {n}/page
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={pageOffset <= 0}
+                    onClick={() => setPageOffset((o) => Math.max(0, o - pageLimit))}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 disabled:opacity-50 hover:bg-white/[0.08]"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    disabled={pageOffset + pageLimit >= modelsTotal}
+                    onClick={() => setPageOffset((o) => o + pageLimit)}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 disabled:opacity-50 hover:bg-white/[0.08]"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </GlassCard>
+          )}
+
+          {activeSection === "keys" && (
+            <GlassCard className="p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-gray-100">My keys</div>
+                  <div className="text-sm text-gray-400">Rotate keys for demos or refresh public keys.</div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={generateLoading}
+                    onClick={async () => {
+                      setKeysError("");
+                      setGenerateLoading(true);
+                      try {
+                        await generateKeys(token);
+                        const data = await getPublicKeys(token);
+                        setPublicKeyInfo(data);
+                        toast("Generated new keys.", "good");
+                        setRecentActivity((prev) => [
+                          { text: "Generated new keypair", time: "just now" },
+                          ...prev.slice(0, 4),
+                        ]);
+                      } catch (e) {
+                        setKeysError(e.message || "Failed to generate keys");
+                      } finally {
+                        setGenerateLoading(false);
+                      }
+                    }}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
+                  >
+                    {generateLoading ? "Generating…" : "Generate"}
+                  </button>
+                  <button
+                    disabled={keysLoading}
+                    onClick={async () => {
+                      setKeysError("");
+                      setKeysLoading(true);
+                      try {
+                        const data = await getPublicKeys(token);
+                        setPublicKeyInfo(data);
+                        toast("Public keys refreshed.", "neutral");
+                      } catch (e) {
+                        setKeysError(e.message || "Failed to load keys");
+                      } finally {
+                        setKeysLoading(false);
+                      }
+                    }}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
+                  >
+                    {keysLoading ? "Loading…" : "Refresh"}
+                  </button>
+                </div>
+              </div>
+              {keysError ? <div className="mt-3 text-sm text-red-300">{keysError}</div> : null}
+              {publicKeyInfo ? (
+                <pre className="mt-4 overflow-auto rounded-xl border border-white/10 bg-black/30 p-4 text-xs text-gray-200">
+                  {JSON.stringify(publicKeyInfo, null, 2)}
+                </pre>
+              ) : (
+                <div className="mt-4 text-sm text-gray-400">No keys loaded yet. Click Refresh.</div>
+              )}
+            </GlassCard>
+          )}
+
+          {activeSection === "users" && (
+            <GlassCard className="p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-gray-100">Users</div>
+                  <div className="text-sm text-gray-400">Find recipients and fetch public keys.</div>
+                </div>
+                <button
+                  disabled={usersLoading}
+                  onClick={async () => {
+                    setUsersError("");
+                    setUsersLoading(true);
+                    try {
+                      const data = await listUsers(token);
+                      setUsers(Array.isArray(data?.items) ? data.items : []);
+                      toast("Loaded users.", "neutral");
+                    } catch (e) {
+                      setUsersError(e.message || "Failed to load users");
+                    } finally {
+                      setUsersLoading(false);
+                    }
+                  }}
+                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
+                >
+                  {usersLoading ? "Loading…" : "List users"}
+                </button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-4">
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="text-sm font-medium text-gray-100">Lookup public keys</div>
+                  <div className="mt-2 flex flex-wrap gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="User id or username"
+                      value={userLookupId}
+                      onChange={(e) => setUserLookupId(e.target.value)}
+                      className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-gray-100 placeholder-gray-500"
+                    />
+                    <button
+                      disabled={userKeyLoading || !userLookupId.trim()}
+                      onClick={async () => {
+                        setUserKeyError("");
+                        setUserKeyResult(null);
+                        setUserKeyLoading(true);
+                        try {
+                          const data = await getPublicKeyById(userLookupId.trim());
+                          setUserKeyResult(data);
+                          toast("Loaded public keys.", "neutral");
+                        } catch (e) {
+                          setUserKeyError(e.message || "Failed to load key");
+                        } finally {
+                          setUserKeyLoading(false);
+                        }
+                      }}
+                      className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
+                    >
+                      {userKeyLoading ? "Loading…" : "Get key"}
+                    </button>
+                  </div>
+                  {userKeyError ? <div className="mt-2 text-sm text-red-300">{userKeyError}</div> : null}
+                  {userKeyResult ? (
+                    <pre className="mt-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-gray-200">
+                      {JSON.stringify(userKeyResult, null, 2)}
+                    </pre>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="text-sm font-medium text-gray-100">Recipients</div>
+                  {usersError ? <div className="mt-2 text-sm text-red-300">{usersError}</div> : null}
+                  {users.length === 0 ? (
+                    <div className="mt-2 text-sm text-gray-400">Click “List users” to load recipients.</div>
+                  ) : (
+                    <ul className="mt-2 max-h-64 overflow-auto divide-y divide-white/10">
+                      {users.map((u) => (
+                        <li key={u.id} className="py-2 flex items-center justify-between">
+                          <div className="text-sm text-gray-100">{u.username}</div>
+                          <div className="text-xs text-gray-500">id: {u.id}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </GlassCard>
+          )}
+
+          <GlassCard className="p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold text-gray-100">Activity</div>
+                <div className="text-sm text-gray-400">Quick audit trail during demos.</div>
+              </div>
+              {signatureDraft ? <IconBadge tone="good">Signature ready</IconBadge> : <IconBadge>Signature empty</IconBadge>}
+            </div>
+            <ul className="mt-3 space-y-2 text-sm text-gray-300">
+              {recentActivity.length === 0 ? (
+                <li className="text-gray-400">No activity yet.</li>
+              ) : (
+                recentActivity.map((a, i) => (
+                  <li key={i} className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                    {a.text} <span className="text-gray-500">— {a.time}</span>
+                  </li>
+                ))
+              )}
+            </ul>
+
+            <div className="mt-4">
+              <div className="text-xs text-gray-400 mb-1">Last signature (base64)</div>
+              <textarea
+                className="w-full min-h-24 rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-gray-100 placeholder-gray-600"
+                value={signatureDraft}
+                placeholder="Sign a model to generate a signature…"
+                onChange={(e) => setSignatureDraft(e.target.value)}
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  disabled={!signatureDraft}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(signatureDraft);
+                      toast("Signature copied to clipboard.", "good");
+                    } catch {
+                      setErr("Failed to copy. Select and copy manually.");
+                    }
+                  }}
+                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
+                >
+                  Copy
+                </button>
+                <button
+                  disabled={!signatureDraft}
+                  onClick={() => setSignatureDraft("")}
+                  className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-gray-300 hover:bg-white/[0.06] disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </GlassCard>
+        </div>
+      </div>
       </div>
 
-      {/* Recent Activity */}
-      <div>
-        <div className="text-sm font-medium text-gray-200 mb-3">Recent Activity</div>
-        <ul className="list-disc list-inside text-sm text-gray-400 space-y-1">
-          {recentActivity.map((a, i) => (
-            <li key={i}>
-              {a.text} – {a.time}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+      <Modal
+        open={Boolean(modal)}
+        title={
+          modal?.type === "encrypt"
+            ? "Encrypt for recipient"
+            : modal?.type === "verify"
+              ? "Verify signature"
+              : modal?.type === "delete"
+                ? "Delete model"
+                : "Action"
+        }
+        description={modal?.model ? `${modal.model.name} (id ${modal.model.id})` : undefined}
+        onClose={() => setModal(null)}
+      >
+        {modal?.type === "encrypt" ? (
+          <div className="space-y-3">
+            <div className="text-sm text-gray-300">
+              Enter a recipient <span className="text-gray-200">username</span> (recommended) or numeric id.
+            </div>
+            <input
+              value={modalRecipient}
+              onChange={(e) => setModalRecipient(e.target.value)}
+              placeholder="e.g. bob"
+              className="w-full rounded-lg border border-gray-700 bg-black/20 px-3 py-2 text-gray-200 placeholder-gray-500"
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setModal(null)}
+                className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const recipient_id = modalRecipient.trim();
+                  if (!recipient_id) return;
+                  try {
+                    await encryptModel(token, { model_id: Number(modal.model.id), recipient_id });
+                    toast("Encrypted copy created for recipient.", "good");
+                    setRecentActivity((prev) => [
+                      { text: `Encrypted ${modal.model.name} for ${recipient_id}`, time: "just now" },
+                      ...prev.slice(0, 4),
+                    ]);
+                    setModal(null);
+                    await loadModels();
+                  } catch (e) {
+                    setErr(e.message || "Encrypt failed");
+                  }
+                }}
+                className="rounded-lg border border-indigo-400/30 bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
+              >
+                Encrypt
+              </button>
+            </div>
+          </div>
+        ) : modal?.type === "verify" ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <div className="text-xs text-gray-400 mb-1">Signer (username or id)</div>
+                <input
+                  value={modalSigner}
+                  onChange={(e) => setModalSigner(e.target.value)}
+                  placeholder="e.g. alice"
+                  className="w-full rounded-lg border border-gray-700 bg-black/20 px-3 py-2 text-gray-200 placeholder-gray-500"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-gray-400 mb-1">Signature (base64)</div>
+                <textarea
+                  value={modalSignature}
+                  onChange={(e) => setModalSignature(e.target.value)}
+                  placeholder="Paste signature here…"
+                  className="w-full min-h-28 rounded-lg border border-gray-700 bg-black/20 px-3 py-2 font-mono text-xs text-gray-200 placeholder-gray-500"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setModal(null)}
+                className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const signer_id = modalSigner.trim();
+                  const signature_b64 = modalSignature.trim();
+                  if (!signer_id || !signature_b64) return;
+                  try {
+                    const res = await verifyModel(token, {
+                      model_id: Number(modal.model.id),
+                      signer_id,
+                      signature_b64,
+                    });
+                    toast(res?.valid ? "Signature is valid." : "Signature is invalid.", res?.valid ? "good" : "bad");
+                    setRecentActivity((prev) => [
+                      { text: `Verified ${modal.model.name} (${res?.valid ? "valid" : "invalid"})`, time: "just now" },
+                      ...prev.slice(0, 4),
+                    ]);
+                    setModal(null);
+                  } catch (e) {
+                    setErr(e.message || "Verify failed");
+                  }
+                }}
+                className="rounded-lg border border-gray-700 bg-black/10 px-3 py-2 text-sm hover:bg-gray-800"
+              >
+                Verify
+              </button>
+            </div>
+          </div>
+        ) : modal?.type === "delete" ? (
+          <div className="space-y-3">
+            <div className="text-sm text-gray-300">
+              This will remove the file from storage and delete its record. This cannot be undone.
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setModal(null)}
+                className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await deleteModel(Number(modal.model.id), token);
+                    toast("Model deleted.", "good");
+                    setRecentActivity((prev) => [
+                      { text: `Deleted ${modal.model.name}`, time: "just now" },
+                      ...prev.slice(0, 4),
+                    ]);
+                    setModal(null);
+                    await loadModels();
+                  } catch (e) {
+                    setErr(e.message || "Delete failed");
+                  }
+                }}
+                className="rounded-lg border border-red-500/30 bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+    </>
   );
 }
 
@@ -421,28 +923,29 @@ useEffect(() => {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col ${token ? "bg-[#0d0d0d]" : "bg-gray-50"}`}>
-      {/* Header */}
-      <header className={`h-16 border-b flex items-center justify-between px-6 ${
-        token ? "border-gray-700 bg-[#1a1a1a] text-gray-100" : "border-gray-200 bg-white"
-      }`}>
-        <div className="flex items-center gap-2">
-          {token && <span>🔒</span>}
-          <div className="text-xl font-bold">QModelGuard</div>
-        </div>
+    <div className="min-h-screen flex flex-col bg-ink-950 bg-grid">
+      <header className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-ink-900/80 backdrop-blur">
+        <Link to="/" className="flex items-center gap-2 text-gray-100 hover:text-white transition-colors">
+          <Brand size={token ? "sm" : "md"} />
+        </Link>
 
         <nav className="flex items-center gap-4 text-sm">
           {!token ? (
             <>
-              <Link className="underline" to="/login">Login</Link>
-              <Link className="underline" to="/register">Register</Link>
+              <Link className="text-gray-400 hover:text-gray-100 transition-colors" to="/login">Sign in</Link>
+              <Link
+                className="rounded-xl bg-cyan-500 text-gray-900 px-4 py-2 font-medium hover:bg-cyan-400 transition-colors"
+                to="/register"
+              >
+                Register
+              </Link>
             </>
           ) : (
             <>
-              <span className="text-gray-400">[{me?.username || "User"} ▼]</span>
+              <span className="text-gray-400">{me?.username || "User"}</span>
               <button
                 onClick={logout}
-                className="rounded border border-gray-500 px-3 py-1 hover:bg-gray-700"
+                className="rounded-xl border border-white/10 px-3 py-2 text-gray-300 hover:bg-white/5 transition-colors"
               >
                 Logout
               </button>
@@ -451,10 +954,7 @@ useEffect(() => {
         </nav>
       </header>
 
-      {/* Centered Content */}
-      <main className={`flex-1 flex items-center justify-center px-4 py-6 ${
-        token ? "bg-[#0d0d0d]" : ""
-      }`}>
+      <main className="flex-1 flex items-center justify-center px-4 py-8">
         <Routes>
           <Route
             path="/login"
