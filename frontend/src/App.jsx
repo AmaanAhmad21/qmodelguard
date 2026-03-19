@@ -297,7 +297,7 @@ function Dashboard({ me, token }) {
         </div>
       )}
 
-      <div className="fixed right-4 top-4 z-40 space-y-2">
+      <div className="fixed right-4 bottom-4 z-40 space-y-2">
         {toasts.map((t) => (
           <div
             key={t.id}
