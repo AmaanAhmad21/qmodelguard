@@ -6,7 +6,7 @@ Quantum-Safe ML Model Protection — Encrypt and sign machine learning models us
 
 - **Backend:** FastAPI (Python), SQLite, local filesystem storage
 - **Frontend:** React + Tailwind CSS + React Router
-- **Crypto:** qcrypto (stubbed; to be implemented)
+- **Crypto:** qcrypto (Kyber + Dilithium). On **Windows** the app uses **stub crypto** (no liboqs); on Linux/macOS it uses real PQC when liboqs is available.
 
 ## Quick Start (Clone and Run)
 
@@ -163,6 +163,63 @@ npm run dev
 
 The backend creates `backend/qmodelguard.db` and tables automatically on first startup. No manual setup required.
 
+### Crypto: stub mode on Windows
+
+On **Windows**, the backend does **not** load liboqs (to avoid failed auto-install). Encrypt/decrypt/sign/verify still work using **stub implementations** so you can run and test the full flow. For **real** post-quantum crypto (Kyber/Dilithium), run the backend on **Linux or macOS** (or WSL), where liboqs can be built and used.
+
+## Demo flow for presentation
+
+Use this sequence for a live demo or to verify the full flow. Backend must be running at `http://localhost:8000`. Use any small `.pt` file (e.g. a few KB) or create one: `echo "dummy" > demo.pt` (may need to be valid PyTorch for real use; for API demo the backend only checks extension).
+
+**1. Show API and crypto mode (for slides)**  
+- Open **http://localhost:8000** — shows app name, version, links to `/docs` and `/health`.  
+- Open **http://localhost:8000/health** — shows `crypto: "real"` or `"stub"`, plus `algorithms: { kem: "Kyber768", sig: "Dilithium3" }`. Use this to say “we’re running real post-quantum crypto” (or explain stub on Windows).
+
+**2. Register two users (Alice, Bob)**  
+```bash
+curl -s -X POST http://localhost:8000/api/users/register -H "Content-Type: application/json" -d '{"username":"alice","password":"pass123"}'
+curl -s -X POST http://localhost:8000/api/users/register -H "Content-Type: application/json" -d '{"username":"bob","password":"pass123"}'
+```
+Save tokens from the JSON responses (`token` and `user_id`). Or login to get a token:
+```bash
+ALICE=$(curl -s -X POST http://localhost:8000/api/users/login -H "Content-Type: application/json" -d '{"username":"alice","password":"pass123"}' | jq -r '.token')
+BOB=$(curl -s -X POST http://localhost:8000/api/users/login -H "Content-Type: application/json" -d '{"username":"bob","password":"pass123"}' | jq -r '.token')
+```
+
+**3. Alice: upload a model**  
+```bash
+curl -s -X POST http://localhost:8000/api/models/upload -H "Authorization: Bearer $ALICE" -F "file=@demo.pt"
+```
+Note the returned `id` (e.g. `MODEL_ID=1`).
+
+**4. Alice: sign the model**  
+```bash
+curl -s -X POST http://localhost:8000/api/models/sign -H "Authorization: Bearer $ALICE" -H "Content-Type: application/json" -d "{\"model_id\": $MODEL_ID}"
+```
+Save the returned `signature_b64` for the verify step.
+
+**5. Alice: encrypt for Bob**  
+```bash
+curl -s -X POST http://localhost:8000/api/models/encrypt -H "Authorization: Bearer $ALICE" -H "Content-Type: application/json" -d "{\"model_id\": $MODEL_ID, \"recipient_id\": \"bob\"}"
+```
+Note `encrypted_model_id` (Bob’s copy of the encrypted file).
+
+**6. Bob: decrypt**  
+```bash
+curl -s -X POST http://localhost:8000/api/models/decrypt -H "Authorization: Bearer $BOB" -H "Content-Type: application/json" -d "{\"model_id\": $ENCRYPTED_MODEL_ID}"
+```
+Returns `decrypted_model_id`. Bob can download the file via `GET /api/models/{id}`.
+
+**7. Bob: verify signature (proves Alice signed the original)**  
+Verification is over the *plaintext* file, so use the decrypted model id from step 6:
+```bash
+curl -s -X POST http://localhost:8000/api/models/verify -H "Authorization: Bearer $BOB" -H "Content-Type: application/json" -d "{\"model_id\": $DECRYPTED_MODEL_ID, \"signer_id\": \"alice\", \"signature_b64\": \"$SIGNATURE_B64\"}"
+```
+Returns `{"valid": true}` when the signature is valid.
+
+**8. Interactive API docs**  
+Open **http://localhost:8000/docs** to show and try all endpoints with “Authorize” (paste a JWT).
+
 ## Project Structure
 
 ```
@@ -187,20 +244,24 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-## API Endpoints (Stub)
+## API Endpoints
 
 | Method | Endpoint                | Description            |
 |--------|-------------------------|------------------------|
 | POST   | /api/keys/generate      | Generate new keypair   |
 | GET    | /api/keys/public        | Get your public key    |
 | GET    | /api/keys/public/{id}   | Get another user's key |
+| GET    | /api/models             | List your models       |
 | POST   | /api/models/upload      | Upload model file      |
 | GET    | /api/models/{id}        | Download model file    |
+| DELETE | /api/models/{id}        | Delete your model      |
 | POST   | /api/models/encrypt     | Encrypt for recipient  |
 | POST   | /api/models/decrypt     | Decrypt with your key  |
 | POST   | /api/models/sign        | Sign model             |
 | POST   | /api/models/verify      | Verify signature       |
-| POST   | /api/users/register     | Register               |
-| POST   | /api/users/login        | Login                  |
+| POST   | /api/users/register     | Register (rate limited)|
+| POST   | /api/users/login        | Login (rate limited)   |
+| GET    | /api/users/me           | Current user           |
+| GET    | /api/users/list         | List users (for Encrypt for…) |
 
-Crypto and auth are stubbed; implement in `backend/app/services/qcrypto.py` and route logic.
+Auth uses JWT; register/login/upload are rate limited per IP. See `backend/.env.example` for JWT_SECRET and optional KEY_ENCRYPTION_KEY.

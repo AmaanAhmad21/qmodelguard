@@ -3,7 +3,7 @@ import base64
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db.database import get_db
 from app.db.models import ModelFile, User
+from app.limiter import limiter
 from app.services import key_store, qcrypto, storage
 
 router = APIRouter()
 
+_UPLOAD_LIMIT = os.getenv("RATE_LIMIT_UPLOAD", "20/minute")
 ALLOWED_EXTENSIONS = {".pt", ".safetensors", ".onnx", ".h5"}
 MAX_MODEL_SIZE_MB = float(os.getenv("MAX_MODEL_SIZE_MB", "512"))  # 512 MB default
 MAX_MODEL_SIZE_BYTES = int(MAX_MODEL_SIZE_MB * 1024 * 1024)
@@ -56,13 +58,14 @@ def _get_model_owned(db: Session, model_id: int, user_id: int) -> ModelFile:
 
 
 @router.post("/upload")
+@limiter.limit(_UPLOAD_LIMIT)
 async def upload_model(
+    request: Request,
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Upload a model file.
-    """
+    """Upload a model file. Rate limited per IP."""
     content = await file.read()
     if len(content) > MAX_MODEL_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="Model file too large")

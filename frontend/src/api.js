@@ -77,6 +77,13 @@ export async function getPublicKeyById(id) {
   return readJson(res);
 }
 
+export async function listUsers(token) {
+  const res = await apiFetch(`${API_BASE}/users/list`, {
+    headers: authHeaders(token),
+  });
+  return readJson(res);
+}
+
 export async function uploadModel(file, token) {
   const fd = new FormData();
   fd.append("file", file);
@@ -94,6 +101,15 @@ export async function listModels(token, limit = 50, offset = 0) {
     `${API_BASE}/models?limit=${limit}&offset=${offset}`,
     { headers: authHeaders(token) }
   );
+  return readJson(res);
+}
+
+/** DELETE /api/models/{id} */
+export async function deleteModel(id, token) {
+  const res = await apiFetch(`${API_BASE}/models/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
   return readJson(res);
 }
 
