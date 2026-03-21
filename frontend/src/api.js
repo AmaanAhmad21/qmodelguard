@@ -156,16 +156,12 @@ export async function signModel(token, { model_id }) {
   return readJson(res);
 }
 
-/** POST /api/models/verify - JSON: { model_id, signature_b64, signer_id }; returns { valid } */
-export async function verifyModel(token, { model_id, signature_b64, signer_id }) {
+/** POST /api/models/verify - JSON: { model_id }; returns { valid, signer } */
+export async function verifyModel(token, { model_id }) {
   const res = await apiFetch(`${API_BASE}/models/verify`, {
     method: "POST",
     headers: { ...authHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model_id: Number(model_id),
-      signature_b64,
-      signer_id,
-    }),
+    body: JSON.stringify({ model_id: Number(model_id) }),
   });
   return readJson(res);
 }

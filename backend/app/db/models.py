@@ -34,7 +34,10 @@ class ModelFile(Base):
     filename = Column(String(256), nullable=False)
     storage_path = Column(String(512), nullable=False)  # Path on filesystem
     is_encrypted = Column(Integer, default=0)  # 0=plain, 1=encrypted
+    signature_b64 = Column(Text, nullable=True)
+    signer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    signer = relationship("User", foreign_keys=[signer_id], lazy="joined")
 
 
 class ActivityLog(Base):

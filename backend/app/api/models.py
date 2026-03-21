@@ -24,21 +24,16 @@ MAX_MODEL_SIZE_BYTES = int(MAX_MODEL_SIZE_MB * 1024 * 1024)
 
 class EncryptRequest(BaseModel):
     model_id: int
-    recipient_id: str  # user id or username
-
+    recipient_id: str
 
 class DecryptRequest(BaseModel):
-    model_id: int  # encrypted model id owned by current user
-
+    model_id: int
 
 class SignRequest(BaseModel):
     model_id: int
 
-
 class VerifyRequest(BaseModel):
     model_id: int
-    signature_b64: str
-    signer_id: str  # user id or username
 
 
 def _get_user_by_id_or_username(db: Session, user_id_or_username: str) -> Optional[User]:
@@ -58,6 +53,15 @@ def _get_model_owned(db: Session, model_id: int, user_id: int) -> ModelFile:
     return model
 
 
+def _sign_model_data(db: Session, user_id: int, data: bytes) -> str:
+    """Sign raw bytes with user's Dilithium key. Returns base64 signature."""
+    priv_b64 = key_store.get_user_private_key(db, user_id, "sig")
+    if not priv_b64:
+        raise HTTPException(status_code=404, detail="No signature private key found")
+    sig_bytes = qcrypto.sign_data(base64.b64decode(priv_b64), data)
+    return base64.b64encode(sig_bytes).decode("ascii")
+
+
 @router.post("/upload")
 @limiter.limit(_UPLOAD_LIMIT)
 async def upload_model(
@@ -66,7 +70,7 @@ async def upload_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Upload a model file. Rate limited per IP."""
+    """Upload a model file. Automatically signed by uploader."""
     content = await file.read()
     if len(content) > MAX_MODEL_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="Model file too large")
@@ -79,18 +83,21 @@ async def upload_model(
             detail=f"Unsupported model extension '{ext}'. Allowed: {sorted(ALLOWED_EXTENSIONS)}",
         )
     storage_path = storage.save_file(content, filename, user.id)
+    sig_b64 = _sign_model_data(db, user.id, content)
 
     model = ModelFile(
         user_id=user.id,
         filename=filename,
         storage_path=storage_path,
         is_encrypted=0,
+        signature_b64=sig_b64,
+        signer_id=user.id,
     )
     db.add(model)
     db.commit()
     db.refresh(model)
-    log_activity(db, user.id, "upload", f"Uploaded {filename}")
-    return {"id": str(model.id), "filename": model.filename, "storage_path": model.storage_path}
+    log_activity(db, user.id, "upload", f"Uploaded and signed {filename}")
+    return {"id": str(model.id), "filename": model.filename}
 
 
 @router.get("")
@@ -100,7 +107,7 @@ async def list_models(
     limit: int = 50,
     offset: int = 0,
 ):
-    """List current user's models. Returns id, filename, is_encrypted, created_at. Pagination: limit (default 50), offset (default 0)."""
+    """List current user's models."""
     if limit < 1 or limit > 100:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
     if offset < 0:
@@ -117,6 +124,8 @@ async def list_models(
                 "id": str(m.id),
                 "filename": m.filename,
                 "is_encrypted": bool(m.is_encrypted),
+                "is_signed": bool(m.signature_b64),
+                "signer": m.signer.username if m.signer else None,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in rows
@@ -130,7 +139,7 @@ async def get_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Download a model file by id. Requires ownership (403 if not yours, 404 if missing)."""
+    """Download a model file by id."""
     try:
         mid = int(id)
     except ValueError:
@@ -155,7 +164,7 @@ async def delete_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a model you own. Removes DB row and file from storage. Returns 404 if not found, 403 if not owner."""
+    """Delete a model you own."""
     try:
         mid = int(id)
     except ValueError:
@@ -167,7 +176,7 @@ async def delete_model(
     try:
         storage.delete_file(model.storage_path)
     except Exception:
-        pass  # best-effort; delete row even if file already missing
+        pass
     db.delete(model)
     db.commit()
     log_activity(db, user.id, "delete", f"Deleted {model_name}")
@@ -180,9 +189,10 @@ async def encrypt_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Encrypt an existing model for a recipient.
+    """Encrypt and sign a model for a recipient.
 
-    Stores the encrypted model under the recipient's account so they can decrypt it.
+    The encrypted copy is stored under the recipient's account with the
+    sender's signature attached so they can verify authenticity.
     """
     model = _get_model_owned(db, body.model_id, user.id)
 
@@ -195,6 +205,9 @@ async def encrypt_model(
         raise HTTPException(status_code=404, detail="Recipient has no KEM public key")
 
     plaintext = storage.load_file(model.storage_path)
+
+    sig_b64 = _sign_model_data(db, user.id, plaintext)
+
     pub_bytes = base64.b64decode(recipient_pub["kem"])
     ciphertext = qcrypto.encrypt_data(pub_bytes, plaintext)
 
@@ -206,11 +219,13 @@ async def encrypt_model(
         filename=enc_filename,
         storage_path=enc_path,
         is_encrypted=1,
+        signature_b64=sig_b64,
+        signer_id=user.id,
     )
     db.add(enc_model)
     db.commit()
     db.refresh(enc_model)
-    log_activity(db, user.id, "encrypt", f"Encrypted {model.filename} for {recipient.username}")
+    log_activity(db, user.id, "encrypt", f"Encrypted & signed {model.filename} for {recipient.username}")
 
     return {
         "encrypted_model_id": str(enc_model.id),
@@ -224,7 +239,7 @@ async def decrypt_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Decrypt an encrypted model you own, producing a decrypted copy you also own."""
+    """Decrypt an encrypted model you own."""
     enc_model = _get_model_owned(db, body.model_id, user.id)
     if not enc_model.is_encrypted:
         raise HTTPException(status_code=400, detail="Model is not marked as encrypted")
@@ -245,6 +260,8 @@ async def decrypt_model(
         filename=out_filename,
         storage_path=out_path,
         is_encrypted=0,
+        signature_b64=enc_model.signature_b64,
+        signer_id=enc_model.signer_id,
     )
     db.add(dec_model)
     db.commit()
@@ -259,15 +276,17 @@ async def sign_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Sign an existing model you own. Returns base64 signature."""
+    """Sign a model you own. Signature is stored on the model record."""
     model = _get_model_owned(db, body.model_id, user.id)
-    priv_b64 = key_store.get_user_private_key(db, user.id, "sig")
-    if not priv_b64:
-        raise HTTPException(status_code=404, detail="No signature private key found")
     data = storage.load_file(model.storage_path)
-    sig_bytes = qcrypto.sign_data(base64.b64decode(priv_b64), data)
+    sig_b64 = _sign_model_data(db, user.id, data)
+
+    model.signature_b64 = sig_b64
+    model.signer_id = user.id
+    db.commit()
+
     log_activity(db, user.id, "sign", f"Signed {model.filename}")
-    return {"signature_b64": base64.b64encode(sig_bytes).decode("ascii")}
+    return {"signed": True, "model_id": str(model.id)}
 
 
 @router.post("/verify")
@@ -276,18 +295,20 @@ async def verify_model(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Verify a signature over an existing model. Returns {valid: bool}."""
+    """Verify the stored signature on a model. No manual paste needed."""
     model = _get_model_owned(db, body.model_id, user.id)
-    signer = _get_user_by_id_or_username(db, body.signer_id)
-    if not signer:
-        raise HTTPException(status_code=404, detail="Signer not found")
-    pub = key_store.get_user_public_keys(db, signer.id)
+    if not model.signature_b64 or not model.signer_id:
+        raise HTTPException(status_code=400, detail="Model has no signature")
+
+    pub = key_store.get_user_public_keys(db, model.signer_id)
     if not pub or "sig" not in pub:
         raise HTTPException(status_code=404, detail="Signer has no signature public key")
+
     data = storage.load_file(model.storage_path)
-    sig_bytes = base64.b64decode(body.signature_b64)
+    sig_bytes = base64.b64decode(model.signature_b64)
     pub_bytes = base64.b64decode(pub["sig"])
     valid = bool(qcrypto.verify_signature(pub_bytes, data, sig_bytes))
-    log_activity(db, user.id, "verify", f"Verified {model.filename} ({'valid' if valid else 'invalid'})")
-    return {"valid": valid}
 
+    signer_name = model.signer.username if model.signer else str(model.signer_id)
+    log_activity(db, user.id, "verify", f"Verified {model.filename} by {signer_name} ({'valid' if valid else 'invalid'})")
+    return {"valid": valid, "signer": signer_name}

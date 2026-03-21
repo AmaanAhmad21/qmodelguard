@@ -9,8 +9,6 @@ import {
   listModels,
   listActivity,
   uploadModel,
-  generateKeys,
-  getPublicKeys,
   getPublicKeyById,
   getModel,
   deleteModel,
@@ -128,12 +126,6 @@ function Dashboard({ me, token }) {
     }, 4500);
   }
 
-  // My Keys state
-  const [keysLoading, setKeysLoading] = useState(false);
-  const [keysError, setKeysError] = useState("");
-  const [publicKeyInfo, setPublicKeyInfo] = useState(null);
-  const [generateLoading, setGenerateLoading] = useState(false);
-
   // Users section state
   const [userLookupId, setUserLookupId] = useState("");
   const [userKeyLoading, setUserKeyLoading] = useState(false);
@@ -158,17 +150,14 @@ function Dashboard({ me, token }) {
       );
     } catch (_) { /* ignore */ }
   }
-  const [actionLoading, setActionLoading] = useState(null); // id+action e.g. "1-sign"
-  const [signatureDraft, setSignatureDraft] = useState(""); // last signature for easy copy/verify
+  const [actionLoading, setActionLoading] = useState(null);
   const [modelSearch, setModelSearch] = useState("");
   const [pageLimit, setPageLimit] = useState(25);
   const [pageOffset, setPageOffset] = useState(0);
   const [modelsTotal, setModelsTotal] = useState(0);
 
-  const [modal, setModal] = useState(null); // { type, model }
+  const [modal, setModal] = useState(null);
   const [modalRecipient, setModalRecipient] = useState("");
-  const [modalSigner, setModalSigner] = useState("");
-  const [modalSignature, setModalSignature] = useState("");
 
   // Health banner (crypto mode)
   const [health, setHealth] = useState(null);
@@ -185,6 +174,8 @@ function Dashboard({ me, token }) {
           id: String(m.id),
           name: m.filename,
           type: m.is_encrypted ? "encrypted" : "plain",
+          is_signed: m.is_signed,
+          signer: m.signer,
           created_at: m.created_at,
         }))
       );
@@ -254,17 +245,18 @@ function Dashboard({ me, token }) {
         toast("Decrypted model created.", "good");
         loadActivity();
       } else if (action === "Sign") {
-        const res = await signModel(token, { model_id: modelId });
+        await signModel(token, { model_id: modelId });
+        toast("Model signed.", "good");
         loadActivity();
-        if (res?.signature_b64) {
-          setSignatureDraft(res.signature_b64);
-          toast("Signature generated. Copy it below.", "good");
-        }
       } else if (action === "Verify") {
-        setModal({ type: "verify", model: { id, name: modelName } });
-        setModalSigner("");
-        setModalSignature(signatureDraft || "");
-        return;
+        const res = await verifyModel(token, { model_id: modelId });
+        toast(
+          res?.valid
+            ? `Signature valid (signed by ${res.signer})`
+            : `Signature invalid`,
+          res?.valid ? "good" : "bad"
+        );
+        loadActivity();
       } else if (action === "Download") {
         const blob = await getModel(modelId, token);
         downloadBlob(blob, modelName);
@@ -282,9 +274,12 @@ function Dashboard({ me, token }) {
   }
 
   function getModelActions(m) {
-    if (m.type === "plain") return ["Download", "Encrypt", "Sign", "Delete"];
-    if (m.type === "encrypted") return ["Download", "Decrypt", "Delete"];
-    return ["Download", "Encrypt", "Sign", "Decrypt", "Verify", "Delete"];
+    const actions = ["Download"];
+    if (m.type === "plain") actions.push("Encrypt", "Sign");
+    if (m.type === "encrypted") actions.push("Decrypt");
+    if (m.is_signed) actions.push("Verify");
+    actions.push("Delete");
+    return actions;
   }
 
   return (
@@ -347,7 +342,6 @@ function Dashboard({ me, token }) {
               {[
                 { id: "models", label: "Models", sub: "Manage, encrypt, verify", icon: "🗂️" },
                 { id: "upload", label: "Upload", sub: "Add a new model file", icon: "📤" },
-                { id: "keys", label: "Keys", sub: "View & rotate keys", icon: "🔑" },
                 { id: "users", label: "Users", sub: "Recipients & public keys", icon: "👥" },
               ].map((x) => (
                 <button
@@ -450,11 +444,16 @@ function Dashboard({ me, token }) {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            {m.type === "encrypted" ? (
-                              <IconBadge tone="warn">Encrypted</IconBadge>
-                            ) : (
-                              <IconBadge tone="good">Plain</IconBadge>
-                            )}
+                            <div className="flex flex-wrap gap-1">
+                              {m.type === "encrypted" ? (
+                                <IconBadge tone="warn">Encrypted</IconBadge>
+                              ) : (
+                                <IconBadge tone="good">Plain</IconBadge>
+                              )}
+                              {m.is_signed && (
+                                <IconBadge tone="good">Signed{m.signer ? ` by ${m.signer}` : ""}</IconBadge>
+                              )}
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-gray-400">
                             {m.created_at ? new Date(m.created_at).toLocaleString() : "—"}
@@ -517,67 +516,6 @@ function Dashboard({ me, token }) {
                   </button>
                 </div>
               </div>
-            </GlassCard>
-          )}
-
-          {activeSection === "keys" && (
-            <GlassCard className="p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-base font-semibold text-gray-100">My keys</div>
-                  <div className="text-sm text-gray-400">Rotate keys for demos or refresh public keys.</div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    disabled={generateLoading}
-                    onClick={async () => {
-                      setKeysError("");
-                      setGenerateLoading(true);
-                      try {
-                        await generateKeys(token);
-                        const data = await getPublicKeys(token);
-                        setPublicKeyInfo(data);
-                        toast("Generated new keys.", "good");
-                        loadActivity();
-                      } catch (e) {
-                        setKeysError(e.message || "Failed to generate keys");
-                      } finally {
-                        setGenerateLoading(false);
-                      }
-                    }}
-                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
-                  >
-                    {generateLoading ? "Generating…" : "Generate"}
-                  </button>
-                  <button
-                    disabled={keysLoading}
-                    onClick={async () => {
-                      setKeysError("");
-                      setKeysLoading(true);
-                      try {
-                        const data = await getPublicKeys(token);
-                        setPublicKeyInfo(data);
-                        toast("Public keys refreshed.", "neutral");
-                      } catch (e) {
-                        setKeysError(e.message || "Failed to load keys");
-                      } finally {
-                        setKeysLoading(false);
-                      }
-                    }}
-                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
-                  >
-                    {keysLoading ? "Loading…" : "Refresh"}
-                  </button>
-                </div>
-              </div>
-              {keysError ? <div className="mt-3 text-sm text-red-300">{keysError}</div> : null}
-              {publicKeyInfo ? (
-                <pre className="mt-4 overflow-auto rounded-xl border border-white/10 bg-black/30 p-4 text-xs text-gray-200">
-                  {JSON.stringify(publicKeyInfo, null, 2)}
-                </pre>
-              ) : (
-                <div className="mt-4 text-sm text-gray-400">No keys loaded yet. Click Refresh.</div>
-              )}
             </GlassCard>
           )}
 
@@ -670,12 +608,9 @@ function Dashboard({ me, token }) {
           )}
 
           <GlassCard className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-base font-semibold text-gray-100">Activity</div>
-                <div className="text-sm text-gray-400">Quick audit trail during demos.</div>
-              </div>
-              {signatureDraft ? <IconBadge tone="good">Signature ready</IconBadge> : <IconBadge>Signature empty</IconBadge>}
+            <div>
+              <div className="text-base font-semibold text-gray-100">Activity</div>
+              <div className="text-sm text-gray-400">Audit trail of all actions.</div>
             </div>
             <ul className="mt-3 space-y-2 text-sm text-gray-300">
               {recentActivity.length === 0 ? (
@@ -688,39 +623,6 @@ function Dashboard({ me, token }) {
                 ))
               )}
             </ul>
-
-            <div className="mt-4">
-              <div className="text-xs text-gray-400 mb-1">Last signature (base64)</div>
-              <textarea
-                className="w-full min-h-24 rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-gray-100 placeholder-gray-600"
-                value={signatureDraft}
-                placeholder="Sign a model to generate a signature…"
-                onChange={(e) => setSignatureDraft(e.target.value)}
-              />
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  disabled={!signatureDraft}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(signatureDraft);
-                      toast("Signature copied to clipboard.", "good");
-                    } catch {
-                      setErr("Failed to copy. Select and copy manually.");
-                    }
-                  }}
-                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
-                >
-                  Copy
-                </button>
-                <button
-                  disabled={!signatureDraft}
-                  onClick={() => setSignatureDraft("")}
-                  className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-sm text-gray-300 hover:bg-white/[0.06] disabled:opacity-50"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
           </GlassCard>
         </div>
       </div>
@@ -731,11 +633,9 @@ function Dashboard({ me, token }) {
         title={
           modal?.type === "encrypt"
             ? "Encrypt for recipient"
-            : modal?.type === "verify"
-              ? "Verify signature"
-              : modal?.type === "delete"
-                ? "Delete model"
-                : "Action"
+            : modal?.type === "delete"
+              ? "Delete model"
+              : "Action"
         }
         description={modal?.model ? `${modal.model.name} (id ${modal.model.id})` : undefined}
         onClose={() => setModal(null)}
@@ -775,59 +675,6 @@ function Dashboard({ me, token }) {
                 className="rounded-lg border border-indigo-400/30 bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
               >
                 Encrypt
-              </button>
-            </div>
-          </div>
-        ) : modal?.type === "verify" ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <div className="text-xs text-gray-400 mb-1">Signer (username or id)</div>
-                <input
-                  value={modalSigner}
-                  onChange={(e) => setModalSigner(e.target.value)}
-                  placeholder="e.g. alice"
-                  className="w-full rounded-lg border border-gray-700 bg-black/20 px-3 py-2 text-gray-200 placeholder-gray-500"
-                />
-              </div>
-              <div>
-                <div className="text-xs text-gray-400 mb-1">Signature (base64)</div>
-                <textarea
-                  value={modalSignature}
-                  onChange={(e) => setModalSignature(e.target.value)}
-                  placeholder="Paste signature here…"
-                  className="w-full min-h-28 rounded-lg border border-gray-700 bg-black/20 px-3 py-2 font-mono text-xs text-gray-200 placeholder-gray-500"
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setModal(null)}
-                className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  const signer_id = modalSigner.trim();
-                  const signature_b64 = modalSignature.trim();
-                  if (!signer_id || !signature_b64) return;
-                  try {
-                    const res = await verifyModel(token, {
-                      model_id: Number(modal.model.id),
-                      signer_id,
-                      signature_b64,
-                    });
-                    toast(res?.valid ? "Signature is valid." : "Signature is invalid.", res?.valid ? "good" : "bad");
-                    setModal(null);
-                    loadActivity();
-                  } catch (e) {
-                    setErr(e.message || "Verify failed");
-                  }
-                }}
-                className="rounded-lg border border-gray-700 bg-black/10 px-3 py-2 text-sm hover:bg-gray-800"
-              >
-                Verify
               </button>
             </div>
           </div>
