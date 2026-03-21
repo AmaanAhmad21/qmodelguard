@@ -4,6 +4,45 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { ApiError } from "./api";
 import Mark from "./assets/qmodelguard-mark.svg";
+
+const iconClass = "w-5 h-5 text-gray-400";
+
+function IconModels({ className = iconClass }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function IconUpload({ className = iconClass }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IconUsers({ className = iconClass }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function IconActivity({ className = iconClass }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
 import {
   getMe,
   listModels,
@@ -342,10 +381,10 @@ function Dashboard({ me, token }) {
             <div className="mt-6 space-y-2">
               <div className="text-xs text-gray-400">Navigation</div>
               {[
-                { id: "models", label: "Models", sub: "Manage, encrypt, verify", icon: "🗂️" },
-                { id: "upload", label: "Upload", sub: "Add a new model file", icon: "📤" },
-                { id: "users", label: "Users", sub: "Recipients & public keys", icon: "👥" },
-                { id: "activity", label: "Activity", sub: "Audit trail & history", icon: "📋" },
+                { id: "models", label: "Models", sub: "Manage, encrypt, verify", Icon: IconModels },
+                { id: "upload", label: "Upload", sub: "Add a new model file", Icon: IconUpload },
+                { id: "users", label: "Users", sub: "Recipients & public keys", Icon: IconUsers },
+                { id: "activity", label: "Activity", sub: "Audit trail & history", Icon: IconActivity },
               ].map((x) => (
                 <button
                   key={x.id}
@@ -357,7 +396,7 @@ function Dashboard({ me, token }) {
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <div className="mt-0.5">{x.icon}</div>
+                    <x.Icon className={`w-5 h-5 mt-0.5 ${activeSection === x.id ? "text-cyan-400" : "text-gray-400"}`} />
                     <div>
                       <div className="text-sm font-medium text-gray-100">{x.label}</div>
                       <div className="text-xs text-gray-400">{x.sub}</div>
