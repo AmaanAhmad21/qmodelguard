@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 load_dotenv()
 
 from app.api import activity, keys, models, users
-from app.db.database import init_db, DB_PATH
+from app.db.database import init_db, DATABASE_URL
 from app.limiter import limiter
 from app.services.storage import ensure_storage_dir, get_storage_path
 from app import auth
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
             "Set JWT_SECRET in backend/.env before deploying or demoing."
         )
     ensure_storage_dir()
-    logger.info("DB path: %s", DB_PATH.resolve())
+    logger.info("Database: %s", DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL)
     logger.info("Storage path: %s", get_storage_path())
     try:
         init_db()
