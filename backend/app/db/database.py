@@ -38,12 +38,34 @@ def _migrate_keypairs():
             conn.commit()
 
 
+def _migrate_models_signature():
+    """Add signature_b64 and signer_id columns to models table if missing."""
+    with engine.connect() as conn:
+        if _is_sqlite:
+            r = conn.execute(text("PRAGMA table_info(models)"))
+            cols = [row[1] for row in r]
+        else:
+            r = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'models'"
+            ))
+            cols = [row[0] for row in r]
+        if not cols:
+            return
+        if "signature_b64" not in cols:
+            conn.execute(text("ALTER TABLE models ADD COLUMN signature_b64 TEXT"))
+        if "signer_id" not in cols:
+            conn.execute(text("ALTER TABLE models ADD COLUMN signer_id INTEGER"))
+        conn.commit()
+
+
 def init_db():
     """Create tables if they don't exist, run migrations."""
     if _is_sqlite:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _migrate_keypairs()
+    _migrate_models_signature()
 
 
 def get_db() -> Session:
