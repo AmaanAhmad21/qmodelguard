@@ -126,12 +126,12 @@ export async function getModel(id, token) {
   return res.blob();
 }
 
-/** POST /api/models/encrypt - JSON: { model_id, recipient_id } */
-export async function encryptModel(token, { model_id, recipient_id }) {
+/** POST /api/models/encrypt - JSON: { model_id, recipient_id, sign } */
+export async function encryptModel(token, { model_id, recipient_id, sign = true }) {
   const res = await apiFetch(`${API_BASE}/models/encrypt`, {
     method: "POST",
     headers: { ...authHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({ model_id: Number(model_id), recipient_id }),
+    body: JSON.stringify({ model_id: Number(model_id), recipient_id, sign }),
   });
   return readJson(res);
 }

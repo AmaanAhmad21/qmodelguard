@@ -51,7 +51,6 @@ import {
   getPublicKeyById,
   getModel,
   deleteModel,
-  signModel,
   decryptModel,
   encryptModel,
   verifyModel,
@@ -199,6 +198,7 @@ function Dashboard({ me, token }) {
 
   const [modal, setModal] = useState(null);
   const [modalRecipient, setModalRecipient] = useState("");
+  const [modalSign, setModalSign] = useState(true);
 
   // Health banner (crypto mode)
   const [health, setHealth] = useState(null);
@@ -277,17 +277,14 @@ function Dashboard({ me, token }) {
     setErr("");
     const modelId = Number(id);
     try {
-      if (action === "Encrypt") {
+      if (action === "Encrypt & Send") {
         setModal({ type: "encrypt", model: { id, name: modelName } });
         setModalRecipient("");
+        setModalSign(true);
         return;
       } else if (action === "Decrypt") {
         await decryptModel(token, { model_id: modelId });
         toast("Decrypted model created.", "good");
-        loadActivity();
-      } else if (action === "Sign") {
-        await signModel(token, { model_id: modelId });
-        toast("Model signed.", "good");
         loadActivity();
       } else if (action === "Verify") {
         const res = await verifyModel(token, { model_id: modelId });
@@ -316,7 +313,7 @@ function Dashboard({ me, token }) {
 
   function getModelActions(m) {
     const actions = ["Download"];
-    if (m.type === "plain") actions.push("Encrypt", "Sign");
+    if (m.type === "plain") actions.push("Encrypt & Send");
     if (m.type === "encrypted") actions.push("Decrypt");
     if (m.is_signed) actions.push("Verify");
     actions.push("Delete");
@@ -748,7 +745,7 @@ function Dashboard({ me, token }) {
         open={Boolean(modal)}
         title={
           modal?.type === "encrypt"
-            ? "Encrypt for recipient"
+            ? "Encrypt & send model"
             : modal?.type === "delete"
               ? "Delete model"
               : "Action"
@@ -757,17 +754,50 @@ function Dashboard({ me, token }) {
         onClose={() => setModal(null)}
       >
         {modal?.type === "encrypt" ? (
-          <div className="space-y-3">
-            <div className="text-sm text-gray-300">
-              Enter a recipient <span className="text-gray-200">username</span> (recommended) or numeric id.
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs text-gray-400 mb-1.5">Recipient</div>
+              <div className="text-sm text-gray-300 mb-2">
+                The model will be encrypted with their public key. Only they can decrypt it.
+              </div>
+              <input
+                value={modalRecipient}
+                onChange={(e) => setModalRecipient(e.target.value)}
+                placeholder="Username or id (e.g. bob)"
+                className="w-full rounded-lg border border-gray-700 bg-black/20 px-3 py-2 text-gray-200 placeholder-gray-500"
+              />
             </div>
-            <input
-              value={modalRecipient}
-              onChange={(e) => setModalRecipient(e.target.value)}
-              placeholder="e.g. bob"
-              className="w-full rounded-lg border border-gray-700 bg-black/20 px-3 py-2 text-gray-200 placeholder-gray-500"
-            />
-            <div className="flex items-center justify-end gap-2 pt-2">
+
+            <div
+              onClick={() => setModalSign(!modalSign)}
+              className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition ${
+                modalSign
+                  ? "border-cyan-500/30 bg-cyan-500/5"
+                  : "border-gray-700 bg-black/10 hover:bg-black/20"
+              }`}
+            >
+              <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition ${
+                modalSign
+                  ? "border-cyan-500 bg-cyan-500"
+                  : "border-gray-600 bg-black/20"
+              }`}>
+                {modalSign && (
+                  <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="2 6 5 9 10 3" />
+                  </svg>
+                )}
+              </div>
+              <div>
+                <div className={`text-sm font-medium ${modalSign ? "text-cyan-200" : "text-gray-300"}`}>
+                  Sign with my key
+                </div>
+                <div className="text-xs text-gray-500">
+                  Attach a Dilithium signature so the recipient can verify it came from you.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 onClick={() => setModal(null)}
                 className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
@@ -779,8 +809,17 @@ function Dashboard({ me, token }) {
                   const recipient_id = modalRecipient.trim();
                   if (!recipient_id) return;
                   try {
-                    await encryptModel(token, { model_id: Number(modal.model.id), recipient_id });
-                    toast("Encrypted copy created for recipient.", "good");
+                    await encryptModel(token, {
+                      model_id: Number(modal.model.id),
+                      recipient_id,
+                      sign: modalSign,
+                    });
+                    toast(
+                      modalSign
+                        ? "Encrypted & signed copy sent to recipient."
+                        : "Encrypted copy sent to recipient.",
+                      "good"
+                    );
                     setModal(null);
                     await loadModels();
                     loadActivity();
@@ -788,9 +827,9 @@ function Dashboard({ me, token }) {
                     setErr(e.message || "Encrypt failed");
                   }
                 }}
-                className="rounded-lg border border-indigo-400/30 bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
+                className="rounded-lg border border-cyan-400/30 bg-cyan-600 px-4 py-2 text-sm text-white hover:bg-cyan-500"
               >
-                Encrypt
+                {modalSign ? "Encrypt & Sign" : "Encrypt"}
               </button>
             </div>
           </div>

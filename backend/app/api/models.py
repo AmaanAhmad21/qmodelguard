@@ -25,6 +25,7 @@ MAX_MODEL_SIZE_BYTES = int(MAX_MODEL_SIZE_MB * 1024 * 1024)
 class EncryptRequest(BaseModel):
     model_id: int
     recipient_id: str
+    sign: bool = True
 
 class DecryptRequest(BaseModel):
     model_id: int
@@ -206,7 +207,11 @@ async def encrypt_model(
 
     plaintext = storage.load_file(model.storage_path)
 
-    sig_b64 = _sign_model_data(db, user.id, plaintext)
+    sig_b64 = None
+    signer_id = None
+    if body.sign:
+        sig_b64 = _sign_model_data(db, user.id, plaintext)
+        signer_id = user.id
 
     pub_bytes = base64.b64decode(recipient_pub["kem"])
     ciphertext = qcrypto.encrypt_data(pub_bytes, plaintext)
@@ -220,12 +225,13 @@ async def encrypt_model(
         storage_path=enc_path,
         is_encrypted=1,
         signature_b64=sig_b64,
-        signer_id=user.id,
+        signer_id=signer_id,
     )
     db.add(enc_model)
     db.commit()
     db.refresh(enc_model)
-    log_activity(db, user.id, "encrypt", f"Encrypted & signed {model.filename} for {recipient.username}")
+    action_desc = f"Encrypted{' & signed' if body.sign else ''} {model.filename} for {recipient.username}"
+    log_activity(db, user.id, "encrypt", action_desc)
 
     return {
         "encrypted_model_id": str(enc_model.id),
