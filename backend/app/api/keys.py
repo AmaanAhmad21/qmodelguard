@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.api.activity import log_activity
 from app.db.database import get_db
 from app.db.models import User
 from app.services import key_store, qcrypto
@@ -34,6 +35,7 @@ def generate_keys(
     pub_sig, priv_sig = qcrypto.keys_to_base64(sig)
     kem_id = _upsert_keypair(db, user.id, "kem", pub_kem, priv_kem)
     sig_id = _upsert_keypair(db, user.id, "sig", pub_sig, priv_sig)
+    log_activity(db, user.id, "keygen", "Generated new keypair")
     return GenerateKeysResponse(
         kem_key_id=str(kem_id),
         sig_key_id=str(sig_id),

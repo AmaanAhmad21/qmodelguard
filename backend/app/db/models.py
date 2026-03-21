@@ -1,6 +1,6 @@
 """SQLite models for QModelGuard."""
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
 Base = declarative_base()
@@ -35,3 +35,14 @@ class ModelFile(Base):
     storage_path = Column(String(512), nullable=False)  # Path on filesystem
     is_encrypted = Column(Integer, default=0)  # 0=plain, 1=encrypted
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActivityLog(Base):
+    """Audit trail for user actions."""
+    __tablename__ = "activity_log"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String(32), nullable=False)
+    detail = Column(String(512), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    user = relationship("User", lazy="joined")

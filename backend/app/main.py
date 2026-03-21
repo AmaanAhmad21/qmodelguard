@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
-from app.api import keys, models, users
+from app.api import activity, keys, models, users
 from app.db.database import init_db, DB_PATH
 from app.limiter import limiter
 from app.services.storage import ensure_storage_dir, get_storage_path
@@ -65,6 +65,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(activity.router, prefix="/api/activity", tags=["activity"])
 app.include_router(keys.router, prefix="/api/keys", tags=["keys"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])

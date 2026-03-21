@@ -6,7 +6,7 @@ On Windows we skip importing qcrypto/oqs so liboqs is never auto-installed (bran
 import base64
 import secrets
 import sys
-from typing import NamedTuple
+from typing import NamedTuple, Optional, Tuple
 
 QCRYPTO_AVAILABLE = False
 _DilithiumSig = _KyberKEM = _decrypt = _encrypt = None
@@ -67,7 +67,7 @@ def generate_sig_keypair() -> KeyPair:
     that mechanism is not supported by the current liboqs build.
     """
     if QCRYPTO_AVAILABLE and _DilithiumSig:
-        last_exc: Exception | None = None
+        last_exc: Optional[Exception] = None
         for alg in (SIG_ALG_PRIMARY, SIG_ALG_FALLBACK):
             try:
                 sig = _DilithiumSig(alg)
@@ -98,7 +98,7 @@ def decrypt_data(private_key: bytes, ciphertext: bytes) -> bytes:
 def sign_data(private_key: bytes, data: bytes) -> bytes:
     """Sign data with ML-DSA/Dilithium secret key."""
     if QCRYPTO_AVAILABLE and _DilithiumSig:
-        last_exc: Exception | None = None
+        last_exc: Optional[Exception] = None
         for alg in (SIG_ALG_PRIMARY, SIG_ALG_FALLBACK):
             try:
                 sig = _DilithiumSig(alg)
@@ -124,7 +124,7 @@ def verify_signature(public_key: bytes, data: bytes, signature: bytes) -> bool:
     return True
 
 
-def keys_to_base64(kp: KeyPair) -> tuple[str, str]:
+def keys_to_base64(kp: KeyPair) -> Tuple[str, str]:
     """Serialize keypair to base64 strings."""
     pub_b64 = base64.b64encode(kp.public_key).decode("ascii")
     priv_b64 = base64.b64encode(kp.private_key).decode("ascii")

@@ -5,6 +5,8 @@ Stored format: plain base64 (legacy) or "v2:" + base64(Fernet ciphertext) for ne
 """
 import logging
 import os
+from typing import Optional
+
 from sqlalchemy.orm import Session
 
 from app.db.models import KeyPair
@@ -80,7 +82,7 @@ def _upsert(db: Session, user_id: int, key_type: str, pub_b64: str, priv_b64: st
     return kp.id
 
 
-def get_user_keys(db: Session, user_id: int) -> dict | None:
+def get_user_keys(db: Session, user_id: int) -> Optional[dict]:
     """Get kem and sig public keys for user. Returns None if no keys."""
     rows = db.query(KeyPair).filter(
         KeyPair.user_id == user_id,
@@ -91,7 +93,7 @@ def get_user_keys(db: Session, user_id: int) -> dict | None:
     return {r.key_type: r for r in rows}
 
 
-def get_user_public_keys(db: Session, user_id: int) -> dict | None:
+def get_user_public_keys(db: Session, user_id: int) -> Optional[dict]:
     """Get public keys only. Returns {kem: b64, sig: b64} or None."""
     rows = get_user_keys(db, user_id)
     if not rows:
@@ -104,7 +106,7 @@ def get_user_public_keys(db: Session, user_id: int) -> dict | None:
     return out if out else None
 
 
-def get_user_private_key(db: Session, user_id: int, key_type: str) -> str | None:
+def get_user_private_key(db: Session, user_id: int, key_type: str) -> Optional[str]:
     """Get private key for user (kem or sig). Returns base64 string or None.
     Decrypts if stored in v2 encrypted form.
     """

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.api.activity import log_activity
 from app.db.database import get_db
 from app.db.models import ModelFile, User
 from app.limiter import limiter
@@ -40,7 +41,7 @@ class VerifyRequest(BaseModel):
     signer_id: str  # user id or username
 
 
-def _get_user_by_id_or_username(db: Session, user_id_or_username: str) -> User | None:
+def _get_user_by_id_or_username(db: Session, user_id_or_username: str) -> Optional[User]:
     try:
         uid = int(user_id_or_username)
         return db.query(User).filter(User.id == uid).first()
@@ -88,6 +89,7 @@ async def upload_model(
     db.add(model)
     db.commit()
     db.refresh(model)
+    log_activity(db, user.id, "upload", f"Uploaded {filename}")
     return {"id": str(model.id), "filename": model.filename, "storage_path": model.storage_path}
 
 
@@ -161,13 +163,15 @@ async def delete_model(
 
     model = _get_model_owned(db, mid, user.id)
 
+    model_name = model.filename
     try:
         storage.delete_file(model.storage_path)
     except Exception:
         pass  # best-effort; delete row even if file already missing
     db.delete(model)
     db.commit()
-    return {"deleted": str(model.id)}
+    log_activity(db, user.id, "delete", f"Deleted {model_name}")
+    return {"deleted": str(mid)}
 
 
 @router.post("/encrypt")
@@ -206,6 +210,7 @@ async def encrypt_model(
     db.add(enc_model)
     db.commit()
     db.refresh(enc_model)
+    log_activity(db, user.id, "encrypt", f"Encrypted {model.filename} for {recipient.username}")
 
     return {
         "encrypted_model_id": str(enc_model.id),
@@ -244,6 +249,7 @@ async def decrypt_model(
     db.add(dec_model)
     db.commit()
     db.refresh(dec_model)
+    log_activity(db, user.id, "decrypt", f"Decrypted {enc_model.filename}")
     return {"decrypted_model_id": str(dec_model.id)}
 
 
@@ -260,6 +266,7 @@ async def sign_model(
         raise HTTPException(status_code=404, detail="No signature private key found")
     data = storage.load_file(model.storage_path)
     sig_bytes = qcrypto.sign_data(base64.b64decode(priv_b64), data)
+    log_activity(db, user.id, "sign", f"Signed {model.filename}")
     return {"signature_b64": base64.b64encode(sig_bytes).decode("ascii")}
 
 
@@ -280,5 +287,7 @@ async def verify_model(
     data = storage.load_file(model.storage_path)
     sig_bytes = base64.b64decode(body.signature_b64)
     pub_bytes = base64.b64decode(pub["sig"])
-    return {"valid": bool(qcrypto.verify_signature(pub_bytes, data, sig_bytes))}
+    valid = bool(qcrypto.verify_signature(pub_bytes, data, sig_bytes))
+    log_activity(db, user.id, "verify", f"Verified {model.filename} ({'valid' if valid else 'invalid'})")
+    return {"valid": valid}
 

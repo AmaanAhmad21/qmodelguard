@@ -1,6 +1,7 @@
 """JWT auth: create tokens, verify, get current user."""
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -25,7 +26,7 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_token(token: str) -> dict | None:
+def decode_token(token: str) -> Optional[dict]:
     """Decode and validate JWT. Returns payload or None."""
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -34,7 +35,7 @@ def decode_token(token: str) -> dict | None:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     """Dependency: require valid JWT and return User."""
@@ -53,9 +54,9 @@ def get_current_user(
 
 
 def get_current_user_optional(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
-) -> User | None:
+) -> Optional[User]:
     """Dependency: return User if valid JWT, else None."""
     if not credentials:
         return None

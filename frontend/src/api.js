@@ -194,3 +194,11 @@ export async function getMe(token) {
   });
   return readJson(res);
 }
+
+/** GET /api/activity - recent activity for current user */
+export async function listActivity(token, limit = 20) {
+  const res = await apiFetch(`${API_BASE}/activity?limit=${limit}`, {
+    headers: authHeaders(token),
+  });
+  return readJson(res);
+}

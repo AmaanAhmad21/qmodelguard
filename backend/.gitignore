@@ -1,0 +1,34 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+
+# SQLite database
+*.db
+
+# Environment variables
+.env
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Storage (uploaded models)
+app/storage/

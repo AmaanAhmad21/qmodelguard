@@ -7,6 +7,7 @@ import Mark from "./assets/qmodelguard-mark.svg";
 import {
   getMe,
   listModels,
+  listActivity,
   uploadModel,
   generateKeys,
   getPublicKeys,
@@ -146,6 +147,17 @@ function Dashboard({ me, token }) {
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState("");
   const [recentActivity, setRecentActivity] = useState([]);
+  async function loadActivity() {
+    try {
+      const data = await listActivity(token);
+      setRecentActivity(
+        (data.items || []).map((a) => ({
+          text: a.detail,
+          time: a.created_at ? new Date(a.created_at).toLocaleString() : "",
+        }))
+      );
+    } catch (_) { /* ignore */ }
+  }
   const [actionLoading, setActionLoading] = useState(null); // id+action e.g. "1-sign"
   const [signatureDraft, setSignatureDraft] = useState(""); // last signature for easy copy/verify
   const [modelSearch, setModelSearch] = useState("");
@@ -185,7 +197,7 @@ function Dashboard({ me, token }) {
   }
 
   useEffect(() => {
-    if (token) loadModels();
+    if (token) { loadModels(); loadActivity(); }
   }, [token, pageLimit, pageOffset]);
 
   useEffect(() => {
@@ -211,12 +223,9 @@ function Dashboard({ me, token }) {
     try {
       await uploadModel(file, token);
       toast("Model uploaded.", "good");
-      setRecentActivity((prev) => [
-        { text: `Uploaded ${file.name}`, time: "just now" },
-        ...prev.slice(0, 4),
-      ]);
       setActiveSection("models");
       await loadModels();
+      loadActivity();
     } catch (e) {
       setErr(e.message || "Upload failed");
     } finally {
@@ -243,16 +252,10 @@ function Dashboard({ me, token }) {
       } else if (action === "Decrypt") {
         await decryptModel(token, { model_id: modelId });
         toast("Decrypted model created.", "good");
-        setRecentActivity((prev) => [
-          { text: `Decrypted ${modelName}`, time: "just now" },
-          ...prev.slice(0, 4),
-        ]);
+        loadActivity();
       } else if (action === "Sign") {
         const res = await signModel(token, { model_id: modelId });
-        setRecentActivity((prev) => [
-          { text: `Signed ${modelName}`, time: "just now" },
-          ...prev.slice(0, 4),
-        ]);
+        loadActivity();
         if (res?.signature_b64) {
           setSignatureDraft(res.signature_b64);
           toast("Signature generated. Copy it below.", "good");
@@ -266,10 +269,6 @@ function Dashboard({ me, token }) {
         const blob = await getModel(modelId, token);
         downloadBlob(blob, modelName);
         toast("Download started.", "neutral");
-        setRecentActivity((prev) => [
-          { text: `Downloaded ${modelName}`, time: "just now" },
-          ...prev.slice(0, 4),
-        ]);
       } else if (action === "Delete") {
         setModal({ type: "delete", model: { id, name: modelName } });
         return;
@@ -539,10 +538,7 @@ function Dashboard({ me, token }) {
                         const data = await getPublicKeys(token);
                         setPublicKeyInfo(data);
                         toast("Generated new keys.", "good");
-                        setRecentActivity((prev) => [
-                          { text: "Generated new keypair", time: "just now" },
-                          ...prev.slice(0, 4),
-                        ]);
+                        loadActivity();
                       } catch (e) {
                         setKeysError(e.message || "Failed to generate keys");
                       } finally {
@@ -769,12 +765,9 @@ function Dashboard({ me, token }) {
                   try {
                     await encryptModel(token, { model_id: Number(modal.model.id), recipient_id });
                     toast("Encrypted copy created for recipient.", "good");
-                    setRecentActivity((prev) => [
-                      { text: `Encrypted ${modal.model.name} for ${recipient_id}`, time: "just now" },
-                      ...prev.slice(0, 4),
-                    ]);
                     setModal(null);
                     await loadModels();
+                    loadActivity();
                   } catch (e) {
                     setErr(e.message || "Encrypt failed");
                   }
@@ -826,11 +819,8 @@ function Dashboard({ me, token }) {
                       signature_b64,
                     });
                     toast(res?.valid ? "Signature is valid." : "Signature is invalid.", res?.valid ? "good" : "bad");
-                    setRecentActivity((prev) => [
-                      { text: `Verified ${modal.model.name} (${res?.valid ? "valid" : "invalid"})`, time: "just now" },
-                      ...prev.slice(0, 4),
-                    ]);
                     setModal(null);
+                    loadActivity();
                   } catch (e) {
                     setErr(e.message || "Verify failed");
                   }
@@ -858,12 +848,9 @@ function Dashboard({ me, token }) {
                   try {
                     await deleteModel(Number(modal.model.id), token);
                     toast("Model deleted.", "good");
-                    setRecentActivity((prev) => [
-                      { text: `Deleted ${modal.model.name}`, time: "just now" },
-                      ...prev.slice(0, 4),
-                    ]);
                     setModal(null);
                     await loadModels();
+                    loadActivity();
                   } catch (e) {
                     setErr(e.message || "Delete failed");
                   }
