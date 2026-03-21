@@ -139,11 +139,13 @@ function Dashboard({ me, token }) {
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState("");
   const [recentActivity, setRecentActivity] = useState([]);
+  const [activityFilter, setActivityFilter] = useState("all");
   async function loadActivity() {
     try {
-      const data = await listActivity(token);
+      const data = await listActivity(token, 50);
       setRecentActivity(
         (data.items || []).map((a) => ({
+          action: a.action,
           text: a.detail,
           time: a.created_at ? new Date(a.created_at).toLocaleString() : "",
         }))
@@ -343,6 +345,7 @@ function Dashboard({ me, token }) {
                 { id: "models", label: "Models", sub: "Manage, encrypt, verify", icon: "🗂️" },
                 { id: "upload", label: "Upload", sub: "Add a new model file", icon: "📤" },
                 { id: "users", label: "Users", sub: "Recipients & public keys", icon: "👥" },
+                { id: "activity", label: "Activity", sub: "Audit trail & history", icon: "📋" },
               ].map((x) => (
                 <button
                   key={x.id}
@@ -607,23 +610,97 @@ function Dashboard({ me, token }) {
             </GlassCard>
           )}
 
-          <GlassCard className="p-5">
-            <div>
-              <div className="text-base font-semibold text-gray-100">Activity</div>
-              <div className="text-sm text-gray-400">Audit trail of all actions.</div>
-            </div>
-            <ul className="mt-3 space-y-2 text-sm text-gray-300">
-              {recentActivity.length === 0 ? (
-                <li className="text-gray-400">No activity yet.</li>
-              ) : (
-                recentActivity.map((a, i) => (
-                  <li key={i} className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
-                    {a.text} <span className="text-gray-500">— {a.time}</span>
-                  </li>
-                ))
-              )}
-            </ul>
-          </GlassCard>
+          {activeSection === "activity" && (() => {
+            const categories = [
+              { id: "all", label: "All" },
+              { id: "upload", label: "Uploads" },
+              { id: "encrypt", label: "Encryption" },
+              { id: "decrypt", label: "Decryption" },
+              { id: "sign", label: "Signing" },
+              { id: "verify", label: "Verification" },
+              { id: "delete", label: "Deletions" },
+            ];
+            const actionToTone = {
+              upload: "good",
+              encrypt: "warn",
+              decrypt: "good",
+              sign: "good",
+              verify: "neutral",
+              delete: "bad",
+              keygen: "neutral",
+            };
+            const filtered = activityFilter === "all"
+              ? recentActivity
+              : recentActivity.filter((a) => a.action === activityFilter);
+            return (
+              <GlassCard className="p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-base font-semibold text-gray-100">Activity</div>
+                    <div className="text-sm text-gray-400">Audit trail of all actions on your account.</div>
+                  </div>
+                  <button
+                    onClick={() => loadActivity()}
+                    className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08]"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {categories.map((c) => {
+                    const count = c.id === "all"
+                      ? recentActivity.length
+                      : recentActivity.filter((a) => a.action === c.id).length;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => setActivityFilter(c.id)}
+                        className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                          activityFilter === c.id
+                            ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+                            : "border-white/10 bg-white/[0.03] text-gray-400 hover:bg-white/[0.06] hover:text-gray-200"
+                        }`}
+                      >
+                        {c.label} <span className="ml-1 opacity-60">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+                  {filtered.length === 0 ? (
+                    <div className="p-4 text-sm text-gray-400">
+                      {recentActivity.length === 0 ? "No activity yet." : "No matching activity."}
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-white/[0.04] text-gray-300">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium">Action</th>
+                          <th className="px-4 py-3 text-left font-medium">Detail</th>
+                          <th className="px-4 py-3 text-right font-medium">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {filtered.map((a, i) => (
+                          <tr key={i} className="hover:bg-white/[0.03]">
+                            <td className="px-4 py-3">
+                              <IconBadge tone={actionToTone[a.action] || "neutral"}>
+                                {a.action}
+                              </IconBadge>
+                            </td>
+                            <td className="px-4 py-3 text-gray-200">{a.text}</td>
+                            <td className="px-4 py-3 text-right text-gray-500 whitespace-nowrap">{a.time}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </GlassCard>
+            );
+          })()}
         </div>
       </div>
       </div>
