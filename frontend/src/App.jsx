@@ -322,7 +322,7 @@ function Dashboard({ me, token }) {
 
   return (
     <>
-      <div className="w-full max-w-6xl">
+      <div className="w-full max-w-7xl">
       {err && (
         <div className="mb-4 p-3 rounded-xl bg-red-900/20 border border-red-600/40 text-red-200 text-sm">
           {err}
@@ -474,11 +474,11 @@ function Dashboard({ me, token }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/10">
-                      {filteredModels.map((m) => (
+                      {filteredModels.map((m, i) => (
                         <tr key={m.id} className="hover:bg-white/[0.03]">
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <span className="text-gray-500">#{m.id}</span>
+                              <span className="text-gray-500 tabular-nums">{i + 1 + pageOffset}</span>
                               <span className="font-medium text-gray-100">{m.name}</span>
                             </div>
                           </td>
@@ -498,13 +498,13 @@ function Dashboard({ me, token }) {
                             {m.created_at ? new Date(m.created_at).toLocaleString() : "—"}
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex flex-wrap justify-end gap-2">
+                            <div className="flex justify-end gap-1.5 whitespace-nowrap">
                               {getModelActions(m).map((action) => (
                                 <button
                                   key={action}
                                   disabled={actionLoading === `${m.id}-${action}`}
                                   onClick={() => handleModelAction(m.id, action, m.name, m.type)}
-                                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-100 hover:bg-white/[0.08] disabled:opacity-50"
+                                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-gray-100 hover:bg-white/[0.08] disabled:opacity-50"
                                 >
                                   {actionLoading === `${m.id}-${action}` ? "…" : action}
                                 </button>
@@ -809,17 +809,21 @@ function Dashboard({ me, token }) {
                   const recipient_id = modalRecipient.trim();
                   if (!recipient_id) return;
                   try {
-                    await encryptModel(token, {
+                    const res = await encryptModel(token, {
                       model_id: Number(modal.model.id),
                       recipient_id,
                       sign: modalSign,
                     });
-                    toast(
-                      modalSign
-                        ? "Encrypted & signed copy sent to recipient."
-                        : "Encrypted copy sent to recipient.",
-                      "good"
-                    );
+                    if (res?.already_sent_before) {
+                      toast(`Sent to ${recipient_id} (note: this model was previously sent to them).`, "warn");
+                    } else {
+                      toast(
+                        modalSign
+                          ? `Encrypted & signed copy sent to ${recipient_id}.`
+                          : `Encrypted copy sent to ${recipient_id}.`,
+                        "good"
+                      );
+                    }
                     setModal(null);
                     await loadModels();
                     loadActivity();

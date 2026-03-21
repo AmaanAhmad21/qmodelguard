@@ -200,6 +200,14 @@ async def encrypt_model(
     recipient = _get_user_by_id_or_username(db, body.recipient_id)
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
+    if recipient.id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot encrypt a model for yourself")
+
+    already_sent = db.query(ModelFile).filter(
+        ModelFile.user_id == recipient.id,
+        ModelFile.filename == f"{model.filename}.enc",
+        ModelFile.is_encrypted == 1,
+    ).first()
 
     recipient_pub = key_store.get_user_public_keys(db, recipient.id)
     if not recipient_pub or "kem" not in recipient_pub:
@@ -236,6 +244,7 @@ async def encrypt_model(
     return {
         "encrypted_model_id": str(enc_model.id),
         "recipient_user_id": str(recipient.id),
+        "already_sent_before": bool(already_sent),
     }
 
 
