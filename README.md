@@ -4,7 +4,8 @@ Quantum-Safe ML Model Protection — Encrypt and sign machine learning models us
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python), SQLite, local filesystem storage
+- **Backend:** FastAPI (Python), SQLAlchemy, local filesystem storage for model files
+- **Database:** PostgreSQL 16 (Docker Compose). Without `DATABASE_URL`, the backend defaults to a local SQLite file (`backend/qmodelguard.db`) for quick dev.
 - **Frontend:** React + Tailwind CSS + React Router
 - **Crypto:** qcrypto (Kyber + Dilithium). On **Windows** the app uses **stub crypto** (no liboqs); on Linux/macOS it uses real PQC when liboqs is available.
 
@@ -159,9 +160,10 @@ npm run dev
 - Use Node 18+ (LTS recommended): `node -v`
 - Install Node from [nodejs.org](https://nodejs.org) or via nvm/fnm.
 
-### SQLite / Database
+### Database
 
-The backend creates `backend/qmodelguard.db` and tables automatically on first startup. No manual setup required.
+- **Docker (recommended full stack):** From the repo root, `docker compose up` runs PostgreSQL and sets `DATABASE_URL` for the backend (see `docker-compose.yml`). Tables are created on startup.
+- **Local Python only:** If `DATABASE_URL` is not set, the backend uses SQLite at `backend/qmodelguard.db` and creates tables automatically. For PostgreSQL locally, set `DATABASE_URL` to a `postgresql://...` connection string (see `requirements.txt` / `psycopg2-binary`).
 
 ### Crypto: stub mode on Windows
 
@@ -229,7 +231,7 @@ QModelGuard/
 │   │   ├── main.py          # FastAPI app
 │   │   ├── api/             # Routers (keys, models, users)
 │   │   ├── services/        # qcrypto + file storage stubs
-│   │   └── db/              # SQLite models + session
+│   │   └── db/              # SQLAlchemy models + session (Postgres or SQLite)
 │   ├── tests/
 │   └── requirements.txt
 ├── frontend/                # React + Tailwind + Vite
