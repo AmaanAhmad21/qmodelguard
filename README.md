@@ -137,6 +137,7 @@ JWT_SECRET=replace-with-a-strong-random-secret
 CORS_ORIGINS=https://YOUR-VERCEL-APP.vercel.app
 STORAGE_DIR=/app/app/storage
 MAX_MODEL_SIZE_MB=25
+USE_RENDER_REQUIREMENTS=true
 ```
 
 Recommended:
@@ -152,6 +153,10 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 The backend Dockerfile binds uvicorn to Render's `PORT` environment variable when Render provides one, and falls back to port `8000` locally.
+
+For the free Render demo, set `USE_RENDER_REQUIREMENTS=true`. The Dockerfile then installs `backend/requirements-render.txt`, which intentionally excludes `qcrypto` so Render free does not spend the build timeout compiling liboqs from source. The hosted free demo therefore runs in **stub crypto** mode, while keeping the UI and end-to-end upload/encrypt/decrypt/sign/verify workflow available.
+
+Do not remove `qcrypto` from `backend/requirements.txt`. When `USE_RENDER_REQUIREMENTS` is not set to `true`, the Dockerfile installs `requirements.txt` by default. Local Docker, WSL/Linux deployments, Docker Compose on a capable host, or paid hosting can use that default path to run real qcrypto/liboqs when the platform can build or provide liboqs.
 
 ### 3. Vercel frontend
 
@@ -183,13 +188,15 @@ https://qmodelguard-backend.onrender.com
 
 On Render free, local filesystem storage is not durable. Uploaded model files may disappear after restarts, deploys, rebuilds, or instance replacement. Neon will keep the database rows, so a model record can remain even if the file is gone.
 
-`qcrypto` may run in stub mode if liboqs is not available in the Render environment. The app remains functional either way. After deployment, check:
+The free Render demo is expected to run in **stub crypto** mode when `USE_RENDER_REQUIREMENTS=true` because `requirements-render.txt` excludes `qcrypto/liboqs`. Local Docker, WSL/Linux, or paid hosting can run **real crypto** by leaving `USE_RENDER_REQUIREMENTS` unset or set to anything other than `true`, which installs `backend/requirements.txt` on a host that can build/use liboqs. The app remains functional either way.
+
+After deployment, check:
 
 ```text
 https://YOUR-RENDER-BACKEND.onrender.com/health
 ```
 
-Confirm `database` and `storage` are `ok`, and check whether `crypto` reports `real` or `stub`.
+Confirm `database` and `storage` are `ok`, and check whether `crypto` reports `real` or `stub`. To enable real qcrypto later, remove `USE_RENDER_REQUIREMENTS=true` and deploy on a host that supports liboqs.
 
 ## Common Errors & Fixes
 
