@@ -96,6 +96,101 @@ Optional env overrides (defaults work for local dev):
 | `CORS_ORIGINS`        | `http://localhost:3000,...` | Allowed CORS origins           |
 | `VITE_API_PROXY_TARGET` | `http://localhost:8000`   | Backend URL for frontend proxy |
 
+## Free Demo Deployment
+
+This setup is intended for a portfolio/demo deployment:
+
+- **Frontend:** Vercel free
+- **Backend:** Render free web service
+- **Database:** Neon free Postgres
+- **File storage:** local Render filesystem for demo only
+
+### 1. Neon Postgres
+
+Create a Neon Postgres database and copy its connection string. The backend already reads `DATABASE_URL` and uses PostgreSQL when it is set.
+
+Use the Neon connection string as:
+
+```bash
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require
+```
+
+### 2. Render backend
+
+Create a Render **Web Service** for the backend.
+
+Recommended settings:
+
+| Setting | Value |
+|---------|-------|
+| Runtime | Docker |
+| Root directory / Docker context | `backend` |
+| Dockerfile path | `backend/Dockerfile` |
+| Start command | Use Dockerfile `CMD` |
+| Health check path | `/health` |
+
+Required backend environment variables on Render:
+
+```bash
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require
+JWT_SECRET=replace-with-a-strong-random-secret
+CORS_ORIGINS=https://YOUR-VERCEL-APP.vercel.app
+STORAGE_DIR=/app/app/storage
+MAX_MODEL_SIZE_MB=25
+```
+
+Recommended:
+
+```bash
+KEY_ENCRYPTION_KEY=replace-with-a-fernet-key
+```
+
+Generate a Fernet key with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+The backend Dockerfile binds uvicorn to Render's `PORT` environment variable when Render provides one, and falls back to port `8000` locally.
+
+### 3. Vercel frontend
+
+Deploy the frontend on Vercel.
+
+Recommended settings:
+
+| Setting | Value |
+|---------|-------|
+| Root directory | `frontend` |
+| Build command | `npm run build` |
+| Output directory | `dist` |
+
+The frontend uses relative `/api` and `/health` requests. `frontend/vercel.json` rewrites those requests to the Render backend, so `VITE_API_URL` is not required.
+
+Before deploying, replace this placeholder in `frontend/vercel.json`:
+
+```text
+https://REPLACE_WITH_RENDER_BACKEND_URL
+```
+
+with your Render backend URL, for example:
+
+```text
+https://qmodelguard-backend.onrender.com
+```
+
+### Demo limitations
+
+On Render free, local filesystem storage is not durable. Uploaded model files may disappear after restarts, deploys, rebuilds, or instance replacement. Neon will keep the database rows, so a model record can remain even if the file is gone.
+
+`qcrypto` may run in stub mode if liboqs is not available in the Render environment. The app remains functional either way. After deployment, check:
+
+```text
+https://YOUR-RENDER-BACKEND.onrender.com/health
+```
+
+Confirm `database` and `storage` are `ok`, and check whether `crypto` reports `real` or `stub`.
+
 ## Common Errors & Fixes
 
 ### Port already in use
